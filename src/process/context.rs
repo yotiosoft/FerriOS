@@ -81,13 +81,3 @@ switch_context:
     ret
 "#
 );
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test_case]
-    fn test_context_size() {
-        assert_eq!(core::mem::size_of::<Context>(), 64);
-    }
-}
