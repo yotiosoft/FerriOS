@@ -131,11 +131,11 @@ lazy_static! {
 
 /// println!, print! マクロの実装
 #[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ($crate::vga_buffer::_print(format_args!($($arg)*)));
+macro_rules! vga_print {
+    ($($arg:tt)*) => ($crate::console::vga_buffer::_print(format_args!($($arg)*)));
 }
 #[macro_export]
-macro_rules! println {
+macro_rules! vga_println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
@@ -153,11 +153,11 @@ pub fn _print(args: fmt::Arguments) {
 // テスト
 #[test_case]
 fn test_println_simple() {
-    println!("test_println_simple output");
+    vga_println!("test_println_simple output");
 }
 #[test_case]
 fn test_println_many() {
     for _ in 0..200 {
-        println!("test_println_many output");
+        vga_println!("test_println_many output");
     }
 }

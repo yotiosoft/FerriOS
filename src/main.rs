@@ -25,11 +25,6 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use ferrios::memory::BootInfoFrameAllocator;
     use x86_64::{ structures::paging::Page, structures::paging::Translate, VirtAddr };
 
-    {
-        use ferrios::serial::SERIAL1;
-        SERIAL1.lock();  // これでlazy_staticが初期化される
-    }
-
     println!("Hello World{}", "!");
 
     ferrios::init();

@@ -7,15 +7,14 @@
 #![feature(alloc_error_handler)]
 #![feature(naked_functions)]
 
-pub mod vga_buffer;
 pub mod interrupts;
 pub mod gdt;
 pub mod memory;
 pub mod allocator;
-pub mod serial;
 pub mod task;
 pub mod process;
 pub mod cpu;
+pub mod console;
 
 mod libbackend;
 pub use libbackend::exit::*;
