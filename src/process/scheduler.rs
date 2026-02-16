@@ -1,8 +1,6 @@
 use super::{ ProcessState, PROCESS_TABLE, NPROC };
-use super::context::Context;
-use super::switch::switch_context;
+use super::context::{ Context, switch_context };
 use crate::cpu;
-use crate::process::switch::save_context;
 use lazy_static::lazy_static;
 
 static mut CURRENT_PID: usize = 0;
@@ -12,7 +10,8 @@ lazy_static! {
     static ref CPU: spin::Mutex<cpu::Cpu> = spin::Mutex::new(cpu::Cpu::new(0));
 }
 
-pub fn start_scheduler() -> ! {
+/// スケジューラ
+pub fn scheduler() -> ! {
     unsafe {
         if SCHEDULER_STARTED {
             panic!("Scheduler already started");
@@ -20,18 +19,6 @@ pub fn start_scheduler() -> ! {
         SCHEDULER_STARTED = true;
     }
 
-    let mut cpu = CPU.lock();
-    unsafe {
-        save_context(&mut cpu.scheduler as *mut Context);
-    }
-    crate::println!("context: {}", cpu.scheduler.rbp);
-    drop(cpu);
-
-    scheduler()
-}
-
-/// スケジューラ
-pub fn scheduler() -> ! {
     loop {
         let (old_context, new_context) = {
             let mut table = PROCESS_TABLE.lock();
@@ -69,10 +56,7 @@ pub fn scheduler() -> ! {
             }
 
             // コンテキストスイッチ
-            let old_context = {
-                let mut cpu = CPU.lock();
-                &mut cpu.scheduler as *mut Context
-            };
+            let old_context = &mut CPU.lock().scheduler as *mut Context;
             let new_context = &table[next_pid].context as *const Context;
 
             (old_context, new_context)
@@ -92,27 +76,25 @@ pub fn yield_from_context() {
         CURRENT_PID
     };
 
-    let mut table = PROCESS_TABLE.lock();
+    let (old_context, new_context) = {
+        let mut table = PROCESS_TABLE.lock();
 
-    if table[current_pid].state != ProcessState::Running {
-        x86_64::instructions::interrupts::enable();
-        return;
-    }
+        if table[current_pid].state != ProcessState::Running {
+            x86_64::instructions::interrupts::enable();
+            return;
+        }
 
-    //crate::println!("yield");
+        //crate::println!("yield");
 
-    // Runnable に変更
-    table[current_pid].state = ProcessState::Runnable;
+        // Runnable に変更
+        table[current_pid].state = ProcessState::Runnable;
 
-    // スケジューラへコンテキストスイッチ
-    let old_context = &mut table[current_pid].context as *mut Context;
-    let new_context = {
-        let cpu = CPU.lock();
-        &cpu.scheduler as *const Context
+        // スケジューラへコンテキストスイッチ
+        let old_context = &mut table[current_pid].context as *mut Context;
+        let new_context = &CPU.lock().scheduler as *const Context;
+
+        (old_context, new_context)
     };
-
-    drop(table);
-
     unsafe {
         x86_64::instructions::interrupts::enable();
         switch_context(old_context, new_context);

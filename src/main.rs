@@ -17,7 +17,6 @@ use ferrios::memory;
 use ferrios::allocator;
 use ferrios::task::{ Task, executor::Executor };
 use ferrios::process;
-use ferrios::{QemuExitCode, exit_qemu, serial_println, serial_print};
 
 entry_point!(kernel_main);
 
@@ -31,7 +30,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         SERIAL1.lock();  // これでlazy_staticが初期化される
     }
 
-    serial_println!("Hello World{}", "!");
+    println!("Hello World{}", "!");
 
     ferrios::init();
 
@@ -65,7 +64,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     for &address in &addresses {
         let virt = VirtAddr::new(address);
         let phys = mapper.translate_addr(virt);
-        serial_println!("{:?} -> {:?}", virt, phys);
+        println!("{:?} -> {:?}", virt, phys);
     }
 
     // allocator 初期化
@@ -73,38 +72,38 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     // allocates
     let x = Box::new(41);
-    serial_println!("heap_value at {:p}", x);
+    println!("heap_value at {:p}", x);
     let mut vec = Vec::new();
     for i in 0..500 {
         vec.push(i);
     }
-    serial_println!("vec at {:p}", vec.as_slice());
+    println!("vec at {:p}", vec.as_slice());
     // 参照されたベクタを作成する → カウントが0になると解放される
     let reference_counted = Rc::new(vec![1, 2, 3]);
     let cloned_reference = reference_counted.clone();
-    serial_println!("current reference count is {}", Rc::strong_count(&cloned_reference));
+    println!("current reference count is {}", Rc::strong_count(&cloned_reference));
     core::mem::drop(reference_counted);
-    serial_println!("reference count is {} now", Rc::strong_count(&cloned_reference));
+    println!("reference count is {} now", Rc::strong_count(&cloned_reference));
 
     #[cfg(test)]
     test_main();
     
-    serial_println!("It did not crash!");
+    println!("It did not crash!");
     
     // カーネルスレッド作成
-    process::create_kernel_thread(kernel_thread_1, 1);
-    process::create_kernel_thread(kernel_thread_2, 2);
-    process::create_kernel_thread(keyboard_thread, 3);
+    process::create_kernel_thread(kernel_thread_0);
+    process::create_kernel_thread(kernel_thread_1);
+    process::create_kernel_thread(keyboard_thread);
 
-    process::scheduler::start_scheduler();
+    process::scheduler::scheduler();
 }
 
 // カーネルスレッド
-fn kernel_thread_1() -> ! {
+fn kernel_thread_0() -> ! {
     let mut count = 0;
     loop {
         // 割り込みが有効か確認
-        serial_println!("Thread 1 running: {}", count);
+        println!("Thread 0 running: {}", count);
         count = count + 1;
         
         for _ in 0..1000000 {
@@ -112,11 +111,11 @@ fn kernel_thread_1() -> ! {
         }
     }
 }
-fn kernel_thread_2() -> ! {
+fn kernel_thread_1() -> ! {
     let mut count = 0;
     loop {
         // 割り込みが有効か確認
-        serial_println!("Thread 2 running: {}", count);
+        println!("Thread 1 running: {}", count);
         count = count + 1;
         
         for _ in 0..1000000 {
