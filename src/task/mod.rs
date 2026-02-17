@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 pub mod executor;
 pub mod simple_executor;
 pub mod keyboard;
+pub mod serial_input;
 
 static TASK_MAX: usize = 100;
 

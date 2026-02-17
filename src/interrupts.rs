@@ -17,6 +17,7 @@ lazy_static! {
         };
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Serial.as_usize()].set_handler_fn(serial_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
 
         idt
@@ -77,6 +78,23 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     }
 }
 
+/// シリアル割り込みハンドラ
+extern "x86-interrupt" fn serial_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    use x86_64::instructions::port::Port;
+
+    let mut port = Port::new(0x3F8);
+    let byte: u8 = unsafe {
+        port.read()
+    };
+
+    // キーボードタスクに渡す
+    crate::task::serial_input::add_byte(byte);
+
+    unsafe {
+        PICS.lock().notify_end_of_interrupt(InterruptIndex::Serial.as_u8());
+    }
+}
+
 // 割り込み
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -92,6 +110,7 @@ pub static PICS: spin::Mutex<ChainedPics> = spin::Mutex::new(
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    Serial = PIC_1_OFFSET + 4,  // COM1, IRQ4
 }
 impl InterruptIndex {
     fn as_u8(self) -> u8 {

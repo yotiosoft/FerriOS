@@ -51,7 +51,6 @@ lazy_static! {
 }
 
 pub fn _print(args: fmt::Arguments) {
-    use core::fmt::Write;
     use x86_64::instructions::interrupts;
 
     // ロック中の割り込みを防止

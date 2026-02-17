@@ -13,6 +13,13 @@ pub fn init() {
     unsafe {
         interrupts::PICS.lock().initialize();
     }
+    // IRQ4 のマスクを解除
+    unsafe {
+        use x86_64::instructions::port::Port;
+        let mut port = Port::<u8>::new(0x21);
+        let mask = port.read();
+        port.write(mask & !(1 << 4));
+    }
     x86_64::instructions::interrupts::enable();
 }
 

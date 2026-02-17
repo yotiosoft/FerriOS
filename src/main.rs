@@ -9,6 +9,7 @@ extern crate alloc;
 
 use ferrios::task::keyboard;
 use bootloader::{ BootInfo, entry_point };
+use ferrios::task::serial_input;
 use core::panic::PanicInfo;
 use alloc::{ boxed::Box, vec, vec::Vec, rc::Rc };
 
@@ -88,7 +89,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // カーネルスレッド作成
     process::create_kernel_thread(kernel_thread_0);
     process::create_kernel_thread(kernel_thread_1);
-    process::create_kernel_thread(keyboard_thread);
+    process::create_kernel_thread(keyboard_and_serial_input_thread);
 
     process::scheduler::scheduler();
 }
@@ -119,10 +120,11 @@ fn kernel_thread_1() -> ! {
     }
 }
 
-// キーボード割り込み用スレッド
-fn keyboard_thread() -> ! {
+// キーボード＆シリアル割り込み用スレッド
+fn keyboard_and_serial_input_thread() -> ! {
     let mut executor = Executor::new();
     executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.spawn(Task::new(serial_input::process_serial_input()));
     executor.run();
 }
 
