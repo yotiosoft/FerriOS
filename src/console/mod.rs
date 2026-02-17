@@ -2,6 +2,8 @@ use core::fmt;
 use spin::Mutex;
 use lazy_static::lazy_static;
 
+use crate::libbackend::test;
+
 pub mod serial;
 pub mod vga_buffer;
 
@@ -24,7 +26,7 @@ impl Console {
         }
     }
 
-    fn detect_serial() -> bool {
+    fn is_serial_avaiable() -> bool {
         use x86_64::instructions::port::Port;
 
         unsafe {
@@ -37,7 +39,7 @@ impl Console {
     }
 
     pub fn update_mode(&self) -> ConsoleMode {
-        if Self::detect_serial() {
+        if Self::is_serial_avaiable() {
             ConsoleMode::Both
         }
         else {
