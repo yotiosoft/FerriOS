@@ -15,7 +15,8 @@ pub enum ConsoleMode {
 }
 
 /// コンソール構造体
-struct Console {
+#[derive(Debug)]
+pub struct Console {
     mode: ConsoleMode,
 }
 
@@ -24,6 +25,14 @@ impl Console {
         Console {
             mode: ConsoleMode::Both,
         }
+    }
+
+    pub fn set(&mut self, mode: ConsoleMode) {
+        self.mode = mode;
+    }
+
+    pub fn get(&self) -> ConsoleMode {
+        self.mode
     }
 
     fn is_serial_avaiable() -> bool {
@@ -38,22 +47,22 @@ impl Console {
         }
     }
 
-    pub fn update_mode(&self) -> ConsoleMode {
-        if Self::is_serial_avaiable() {
+    pub fn update_mode(&mut self) {
+        self.mode = if Self::is_serial_avaiable() {
             ConsoleMode::Both
         }
         else {
             ConsoleMode::Vga
-        }
+        };
     }
 }
 
 lazy_static! {
-    static ref CONSOLE: Mutex<Console> = Mutex::new(Console::new());
+    pub static ref CONSOLE: Mutex<Console> = Mutex::new(Console::new());
 }
 
 pub fn init() {
-    let console = CONSOLE.lock();
+    let mut console = CONSOLE.lock();
     console.update_mode();
 }
 
@@ -79,7 +88,6 @@ pub fn _print(args: fmt::Arguments) {
     });
 }
 
-/// シリアルポートに文字列を書き込む
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
@@ -87,11 +95,9 @@ macro_rules! print {
     };
 }
 
-/// シリアルポートに文字列を書き込み、改行する
 #[macro_export]
 macro_rules! println {
     () => ($crate::console::_print("\n"));
     ($fmt:expr) => ($crate::print!(concat!($fmt, "\n")));
     ($fmt:expr, $($arg:tt)*) => ($crate::print!(concat!($fmt, "\n"), $($arg)*));
 }
-

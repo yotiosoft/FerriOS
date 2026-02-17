@@ -34,6 +34,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     ferrios::init();
     console::init();
     println!("done.");
+    
+    let console_mode = console::CONSOLE.lock().get();
+    println!("console-mode: {:?}", console_mode);
 
     println!("Checking Virtual Memory..");
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
