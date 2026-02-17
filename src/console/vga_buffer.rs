@@ -61,6 +61,11 @@ impl Writer {
     pub fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => self.new_line(),
+            b'\t' => {
+                for _ in 0..4 {
+                    self.write_byte(b' ');
+                }
+            }
             byte => {
                 if self.column_position >= BUFFER_WIDTH {
                     self.new_line();
@@ -104,7 +109,7 @@ impl Writer {
         for byte in s.bytes() {
             match byte {
                 // 出力可能な ASCII byte または改行コード
-                0x20..=0x7e | b'\n' => self.write_byte(byte),
+                0x20..=0x7e | b'\n' | b'\t' => self.write_byte(byte),
                 // 出力不可な文字 -> 特定の文字に置き換え
                 _ => self.write_byte(0xfe),
             }

@@ -13,7 +13,7 @@ use ferrios::task::serial_input;
 use core::panic::PanicInfo;
 use alloc::{ boxed::Box, vec, vec::Vec, rc::Rc };
 
-use ferrios::println;
+use ferrios::{ println, print };
 use ferrios::memory;
 use ferrios::allocator;
 use ferrios::task::{ Task, executor::Executor };
@@ -26,10 +26,14 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use ferrios::memory::BootInfoFrameAllocator;
     use x86_64::{ structures::paging::Page, structures::paging::Translate, VirtAddr };
 
-    println!("Hello World{}", "!");
+    println!("Welcome to FerriOS!");
+    println!("");
 
+    print!("Initializing..");
     ferrios::init();
+    println!("done.");
 
+    println!("Checking Virtual Memory..");
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe {
@@ -60,37 +64,41 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     for &address in &addresses {
         let virt = VirtAddr::new(address);
         let phys = mapper.translate_addr(virt);
-        println!("{:?} -> {:?}", virt, phys);
+        println!("\t{:?} -> {:?}", virt, phys);
     }
+    println!("done.");
 
     // allocator 初期化
+    println!("Initializing heap memory..");
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     // allocates
     let x = Box::new(41);
-    println!("heap_value at {:p}", x);
+    println!("\theap_value at {:p}", x);
     let mut vec = Vec::new();
     for i in 0..500 {
         vec.push(i);
     }
-    println!("vec at {:p}", vec.as_slice());
+    println!("\tvec at {:p}", vec.as_slice());
     // 参照されたベクタを作成する → カウントが0になると解放される
     let reference_counted = Rc::new(vec![1, 2, 3]);
     let cloned_reference = reference_counted.clone();
-    println!("current reference count is {}", Rc::strong_count(&cloned_reference));
+    println!("\tcurrent reference count is {}", Rc::strong_count(&cloned_reference));
     core::mem::drop(reference_counted);
-    println!("reference count is {} now", Rc::strong_count(&cloned_reference));
+    println!("\treference count is {} now", Rc::strong_count(&cloned_reference));
+    println!("done.");
 
     #[cfg(test)]
     test_main();
     
-    println!("It did not crash!");
-    
     // カーネルスレッド作成
+    print!("Starting kernel threads..");
     process::create_kernel_thread(kernel_thread_0);
     process::create_kernel_thread(kernel_thread_1);
     process::create_kernel_thread(keyboard_and_serial_input_thread);
+    println!("done.");
 
+    println!("Starting the scheduler..");
     process::scheduler::scheduler();
 }
 
