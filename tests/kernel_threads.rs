@@ -10,6 +10,7 @@ use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use ferrios::println;
 use ferrios::process;
+use ferrios::process::scheduler::Scheduler;
 
 entry_point!(main);
 
@@ -32,7 +33,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
     process::create_kernel_thread(kernel_thread_0);
     process::create_kernel_thread(kernel_thread_1);
 
-    process::scheduler::scheduler();
+    process::scheduler::get_scheduler().scheduler();
 }
 
 // カーネルスレッド

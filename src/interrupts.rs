@@ -6,6 +6,7 @@ use crate::{print, println};
 use crate::gdt;
 use crate::hlt_loop;
 use crate::process::scheduler;
+use crate::process::scheduler::Scheduler;
 
 // まだヒープが存在しないため、IDT は静的変数として定義する
 lazy_static! {

@@ -6,30 +6,15 @@ use x86_64::{
 };
 
 use crate::allocator::fixed_size_block::FixedSizeBlockAllocator;
+use crate::libbackend::lock;
 
 pub mod fixed_size_block;
 
 #[global_allocator]
-static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());
+static ALLOCATOR: lock::Locked<FixedSizeBlockAllocator> = lock::Locked::new(FixedSizeBlockAllocator::new());
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
 pub const HEAP_SIZE: usize = 100 * 1024;        // 100 KiB
-
-// トレイト実装を許してもらうための spin::Mutex をラップする型
-pub struct Locked<A> {
-    inner: spin::Mutex<A>,
-}
-impl<A> Locked<A> {
-    pub const fn new(inner: A) -> Self {
-        Locked {
-            inner: spin::Mutex::new(inner),
-        }
-    }
-
-    pub fn lock(&self) -> spin::MutexGuard<A> {
-        self.inner.lock()
-    }
-}
 
 pub fn init_heap(mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), MapToError<Size4KiB>> {
     let page_range = {

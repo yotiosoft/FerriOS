@@ -18,6 +18,7 @@ use ferrios::memory;
 use ferrios::allocator;
 use ferrios::task::{ Task, executor::Executor };
 use ferrios::process;
+use ferrios::process::scheduler;
 use ferrios::console;
 
 entry_point!(kernel_main);
@@ -33,6 +34,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     print!("Initializing..");
     ferrios::init();
     console::init();
+    scheduler::init(Box::new(scheduler::round_robin::RoundRobin));
     println!("done.");
     
     let console_mode = console::CONSOLE.lock().get();
@@ -104,7 +106,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     println!("done.");
 
     println!("Starting the scheduler..");
-    process::scheduler::scheduler();
+    process::scheduler::get_scheduler().scheduler();
 }
 
 // カーネルスレッド

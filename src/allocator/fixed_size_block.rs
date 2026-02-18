@@ -1,5 +1,5 @@
 use core::{ mem, ptr, ptr::NonNull };
-use super::Locked;
+use crate::libbackend::lock;
 use alloc::alloc::{ Layout, GlobalAlloc };
 
 struct ListNode {
@@ -51,7 +51,7 @@ fn list_index(layout: &Layout) -> Option<usize> {
     BLOCK_SIZES.iter().position(|&s| s >= required_block_size)
 }
 
-unsafe impl GlobalAlloc for Locked<FixedSizeBlockAllocator> {
+unsafe impl GlobalAlloc for lock::Locked<FixedSizeBlockAllocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let mut allocator = self.lock();
 
