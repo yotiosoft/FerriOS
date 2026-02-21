@@ -100,9 +100,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     
     // カーネルスレッド作成
     print!("Starting kernel threads..");
-    process::create_kernel_thread(kernel_thread_0);
-    process::create_kernel_thread(kernel_thread_1);
-    process::create_kernel_thread(keyboard_and_serial_input_thread);
+    process::kthread::create_kernel_thread(kernel_thread_0);
+    process::kthread::create_kernel_thread(kernel_thread_1);
+    process::kthread::create_kernel_thread(keyboard_and_serial_input_thread);
     println!("done.");
 
     println!("Starting the scheduler..");
