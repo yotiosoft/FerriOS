@@ -19,7 +19,7 @@ impl super::Scheduler for RoundRobin {
             
             // 次に実行するスレッドの決定
             let next_pid = {
-                find_next_runnable_thread(&table, cpu.current_pid)
+                find_next_runnable_thread(&table, cpu.current_tid)
             };
 
             match next_pid {
@@ -31,16 +31,16 @@ impl super::Scheduler for RoundRobin {
                 }
                 Some(next_pid) => {
                     let (old_context, new_context) = {
-                        // プロセス状態を更新
+                        // スレッド状態を更新
                         table[next_pid].state = ThreadState::Running;
-                        if let Some(current_pid) = cpu.current_pid {
+                        if let Some(current_pid) = cpu.current_tid {
                             if table[current_pid].state == ThreadState::Running {
                                 table[current_pid].state = ThreadState::Runnable;
                             }
                         }
                         
-                        // CPU で実行中のプロセス ID を更新
-                        cpu.current_pid = Some(next_pid);
+                        // CPU で実行中のスレッド ID を更新
+                        cpu.current_tid = Some(next_pid);
                         
                         let old_context = &mut cpu.scheduler as *mut Context;
                         let new_context = &table[next_pid].context as *const Context;
@@ -68,7 +68,7 @@ impl super::Scheduler for RoundRobin {
         let mut table = THREAD_TABLE.lock();
         let cpu = CPU.lock();
 
-        let current_pid = cpu.current_pid;
+        let current_pid = cpu.current_tid;
         if current_pid.is_none() {
             x86_64::instructions::interrupts::enable();
             return;

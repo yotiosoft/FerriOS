@@ -3,7 +3,7 @@ use crate::scheduler::context;
 pub struct Cpu {
     pub id: usize,                      // CPU ID
     pub scheduler: context::Context,    // スケジューラ用コンテキスト
-    pub current_pid: Option<usize>,     // 現在実行中のプロセス ID
+    pub current_tid: Option<usize>,     // 現在実行中のスレッド ID
 }
 
 impl Cpu {
@@ -11,7 +11,7 @@ impl Cpu {
         Cpu {
             id: cpu_id,
             scheduler: context::Context::new(),
-            current_pid: None,
+            current_tid: None,
         }
     }
 }

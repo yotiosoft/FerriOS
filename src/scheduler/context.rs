@@ -76,7 +76,7 @@ switch_context:
     push rax
     popfq
     
-    # 新しいプロセスへ jump
+    # 次のスレッドへ jump
     push qword ptr [rsi + 56]
     ret
 "#

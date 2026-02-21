@@ -19,9 +19,9 @@ pub enum ThreadState {
 #[derive(Debug, Clone, Copy)]
 pub struct Thread {
     pub tid: usize,             // Thread ID
-    pub state: ThreadState,    // プロセスの状態
-    pub context: Context,       // プロセスのコンテキスト
-    pub kstack: u64,            // このプロセス用のカーネルスタック
+    pub state: ThreadState,     // スレッドの状態
+    pub context: Context,       // スレッドのコンテキスト
+    pub kstack: u64,            // このスレッド用のカーネルスタック
 }
 
 impl Thread {
