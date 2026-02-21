@@ -1,9 +1,9 @@
-use super::{ next_pid, STACK_SIZE, PROCESS_TABLE, ProcessState };
+use super::{ next_tid, STACK_SIZE, PROCESS_TABLE, ProcessState };
 
 /// カーネルスレッド作成
 pub fn create_kernel_thread(entry: fn() -> !) {
     // プロセス ID を確保
-    let pid = next_pid().expect("Process table is full");
+    let pid = next_tid().expect("Process table is full");
 
     // スタックを作成
     let stack = unsafe {
@@ -13,7 +13,7 @@ pub fn create_kernel_thread(entry: fn() -> !) {
     let stack_top = stack as u64 + STACK_SIZE as u64;
 
     let mut table = PROCESS_TABLE.lock();
-    table[pid].pid = pid;
+    table[pid].tid = pid;
     table[pid].state = ProcessState::Runnable;
     table[pid].kstack = stack_top;
 

@@ -9,8 +9,8 @@ extern crate alloc;
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use ferrios::println;
-use ferrios::process;
-use ferrios::process::scheduler::Scheduler;
+use ferrios::thread;
+use ferrios::thread::scheduler::Scheduler;
 
 entry_point!(main);
 
@@ -30,10 +30,10 @@ fn main(boot_info: &'static BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     // カーネルスレッド作成
-    process::create_kernel_thread(kernel_thread_0);
-    process::create_kernel_thread(kernel_thread_1);
+    thread::kthread::create_kernel_thread(kernel_thread_0);
+    thread::kthread::create_kernel_thread(kernel_thread_1);
 
-    process::scheduler::scheduler();
+    thread::scheduler::scheduler();
 }
 
 // カーネルスレッド

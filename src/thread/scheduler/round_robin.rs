@@ -1,4 +1,4 @@
-use super::{ Process, ProcessState, PROCESS_TABLE, NPROC, CPU, SCHEDULER_STARTED };
+use super::{ Thread, ProcessState, PROCESS_TABLE, NPROC, CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
 
 pub struct RoundRobin;
@@ -98,7 +98,7 @@ impl super::Scheduler for RoundRobin {
     }
 }
 
-fn find_next_runnable_process(table: &[Process; NPROC], current_pid: Option<usize>) -> Option<usize> {
+fn find_next_runnable_process(table: &[Thread; NPROC], current_pid: Option<usize>) -> Option<usize> {
     let current_pid = current_pid.unwrap_or(0);
     for i in 1..NPROC+1 {
         let pid = (current_pid + i) % NPROC;

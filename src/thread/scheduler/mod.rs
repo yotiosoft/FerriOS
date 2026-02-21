@@ -1,4 +1,4 @@
-use super::{ Process, ProcessState, PROCESS_TABLE, NPROC };
+use super::{ Thread, ProcessState, PROCESS_TABLE, NPROC };
 use super::context;
 use crate::cpu;
 use lazy_static::lazy_static;

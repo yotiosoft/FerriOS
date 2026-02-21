@@ -24,17 +24,17 @@ pub enum ProcessState {
 
 /// Process Control Block
 #[derive(Debug, Clone, Copy)]
-pub struct Process {
-    pub pid: usize,             // Process ID
+pub struct Thread {
+    pub tid: usize,             // Thread ID
     pub state: ProcessState,    // プロセスの状態
     pub context: Context,       // プロセスのコンテキスト
     pub kstack: u64,            // このプロセス用のカーネルスタック
 }
 
-impl Process {
+impl Thread {
     pub fn new() -> Self {
-        Process {
-            pid: 0,
+        Thread {
+            tid: 0,
             state: ProcessState::Unused,
             context: Context::new(),
             kstack: 0,
@@ -46,13 +46,13 @@ impl Process {
 pub const NPROC: usize = 64;
 
 lazy_static! {
-    pub static ref PROCESS_TABLE: Mutex<[Process; NPROC]> = {
-        Mutex::new([Process::new(); NPROC])
+    pub static ref PROCESS_TABLE: Mutex<[Thread; NPROC]> = {
+        Mutex::new([Thread::new(); NPROC])
     };
 }
 
-/// プロセス ID 決定
-pub fn next_pid() -> Option<usize> {
+/// Thread ID 決定
+pub fn next_tid() -> Option<usize> {
     let table = PROCESS_TABLE.lock();
     for i in 0..NPROC-1 {
         if table[i].state == ProcessState::Unused {

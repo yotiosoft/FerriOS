@@ -1,4 +1,4 @@
-use crate::process::context;
+use crate::thread::context;
 
 pub struct Cpu {
     pub id: usize,                      // CPU ID
