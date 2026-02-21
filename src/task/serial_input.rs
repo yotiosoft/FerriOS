@@ -53,7 +53,7 @@ impl Stream for SerialInputStream {
 }
 
 // シリアル入力タスク
-pub async fn process_serial_input() {
+pub async fn thread_serial_input() {
     let mut stream = SerialInputStream::new();
 
     while let Some(byte) = stream.next().await {

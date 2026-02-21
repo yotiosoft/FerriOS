@@ -17,8 +17,8 @@ use ferrios::{ println, print };
 use ferrios::memory;
 use ferrios::allocator;
 use ferrios::task::{ Task, executor::Executor };
-use ferrios::process;
-use ferrios::process::scheduler;
+use ferrios::thread;
+use ferrios::scheduler;
 use ferrios::console;
 
 entry_point!(kernel_main);
@@ -100,13 +100,13 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     
     // カーネルスレッド作成
     print!("Starting kernel threads..");
-    process::create_kernel_thread(kernel_thread_0);
-    process::create_kernel_thread(kernel_thread_1);
-    process::create_kernel_thread(keyboard_and_serial_input_thread);
+    thread::create_kernel_thread(kernel_thread_0);
+    thread::create_kernel_thread(kernel_thread_1);
+    thread::create_kernel_thread(keyboard_and_serial_input_thread);
     println!("done.");
 
     println!("Starting the scheduler..");
-    process::scheduler::scheduler();
+    scheduler::scheduler();
 }
 
 // カーネルスレッド
@@ -139,7 +139,7 @@ fn kernel_thread_1() -> ! {
 fn keyboard_and_serial_input_thread() -> ! {
     let mut executor = Executor::new();
     executor.spawn(Task::new(keyboard::print_keypresses()));
-    executor.spawn(Task::new(serial_input::process_serial_input()));
+    executor.spawn(Task::new(serial_input::thread_serial_input()));
     executor.run();
 }
 

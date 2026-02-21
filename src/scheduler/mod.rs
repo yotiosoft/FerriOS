@@ -1,10 +1,10 @@
-use super::{ Process, ProcessState, PROCESS_TABLE, NPROC };
-use super::context;
+use crate::thread::{ Thread, ThreadState, THREAD_TABLE, NTHREAD };
 use crate::cpu;
 use lazy_static::lazy_static;
 use conquer_once::spin::OnceCell;
 use alloc::boxed::Box;
 
+pub mod context;
 pub mod round_robin;
 
 lazy_static! {

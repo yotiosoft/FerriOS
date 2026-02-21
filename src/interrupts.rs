@@ -5,8 +5,7 @@ use spin;
 use crate::{print, println};
 use crate::gdt;
 use crate::hlt_loop;
-use crate::process::scheduler;
-use crate::process::scheduler::Scheduler;
+use crate::scheduler;
 
 // まだヒープが存在しないため、IDT は静的変数として定義する
 lazy_static! {
@@ -56,7 +55,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     }
 
     unsafe {
-        if crate::process::scheduler::SCHEDULER_STARTED {
+        if crate::scheduler::SCHEDULER_STARTED {
             scheduler::yield_from_context();
 
             PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
