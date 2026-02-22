@@ -63,4 +63,35 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
     table[tid].context.cs = gdt::GDT.1.user_code_selector.0 as u64;
     table[tid].context.ss = gdt::GDT.1.user_data_selector.0 as u64;
     table[tid].context.rsp3 = USER_STACK_TOP;
+
+    Ok(())
+}
+
+unsafe extern "C" fn ring3_entry_trampoline() -> ! {
+    let table = THREAD_TABLE.lock();
+    let ctx = &table[super::current_tid().expect("No running thread")].context;
+    let cs = ctx.cs;
+    let ss = ctx.ss;
+    let rsp3 = ctx.rsp3;
+    let rip = USER_CODE_START;
+
+    unsafe {
+        core::arch::asm!(
+            "mov ds, ax",
+            "mov es, ax",
+            "push rax",
+            "push {rsp3}",
+            "push {rflags}",
+            "push {cs}",
+            "push {rip}",
+            "iretq",
+            inout("ax") ss => _,
+            cs = in(reg) cs,
+            rsp3 = in(reg) rsp3,
+            rflags = in(reg) 0x202u64,
+            rip = in(reg) rip,
+        );
+    }
+
+    loop {}
 }

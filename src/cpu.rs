@@ -1,4 +1,9 @@
 use crate::scheduler::context;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref CPU: spin::Mutex<Cpu> = spin::Mutex::new(Cpu::new(0));
+}
 
 pub struct Cpu {
     pub id: usize,                      // CPU ID

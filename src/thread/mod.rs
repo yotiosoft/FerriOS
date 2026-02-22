@@ -1,5 +1,6 @@
 use crate::scheduler;
 use scheduler::context::Context;
+use crate::cpu;
 
 pub mod kthread;
 pub mod uthread;
@@ -57,4 +58,10 @@ pub fn next_tid() -> Option<usize> {
         }
     }
     None
+}
+
+/// 現在実行中のスレッドの tid を取得
+pub fn current_tid() -> Option<usize> {
+    let cpu = cpu::CPU.lock();
+    cpu.current_tid
 }

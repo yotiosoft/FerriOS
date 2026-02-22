@@ -1,4 +1,4 @@
-use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, CPU, SCHEDULER_STARTED };
+use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, cpu::CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
 
 pub struct RoundRobin;
