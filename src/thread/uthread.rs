@@ -10,13 +10,6 @@ pub const USER_CODE_START: u64 = 0x0000_1000_0000_0000;
 pub const USER_STACK_TOP: u64 = 0x0000_2000_0000_0000;
 pub const USER_STACK_PAGES: u64 = 4;
 
-/// ユーザコードのエントリポイント
-static USER_CODE: &[u8] = &[
-    0x48, 0x31, 0xC0,           // xor rax, rax
-    0x48, 0xFF, 0xC0,           // inc rax
-    0xEB, 0xFB,                 // jmp -5
-];
-
 pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
     // スレッド ID を確保
     let tid = super::next_tid().expect("Thread table is full");
@@ -68,12 +61,11 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
 }
 
 unsafe extern "C" fn ring3_entry_trampoline() -> ! {
-    let table = THREAD_TABLE.lock();
-    let ctx = &table[super::current_tid().expect("No running thread")].context;
-    let cs = ctx.cs;
-    let ss = ctx.ss;
-    let rsp3 = ctx.rsp3;
-    let rip = USER_CODE_START;
+    let (cs, ss, rsp3, rip) = {
+        let table = THREAD_TABLE.lock();
+        let ctx =&table[super::current_tid().expect("No running thread")].context;
+        (ctx.cs, ctx.ss, ctx.rsp3, USER_CODE_START)
+    };
 
     unsafe {
         core::arch::asm!(

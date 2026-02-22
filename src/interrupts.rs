@@ -49,9 +49,15 @@ extern "x86-interrupt" fn page_fault_handler(stack_frame: InterruptStackFrame, e
 }
 
 /// タイマ割り込みハンドラ
-extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFrame) {
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+
+    // CS の下位2ビットが CPL（現在の特権レベル）
+    let cpl = stack_frame.code_segment & 0b11;
+    if cpl == 3 {
+        println!("Ring 3 confirmed! rip={:#x}", stack_frame.instruction_pointer);
     }
 
     unsafe {

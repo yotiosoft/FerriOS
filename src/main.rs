@@ -107,14 +107,13 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     println!("done.");
 
     // ユーザプロセス作成
-    process::map_user_pages(&mut mapper, &mut frame_allocator).expect("failed to map user pages");
-    process::copy_user_code_to_memory();
-    unsafe {
-        process::jump_to_usermode(
-            ferrios::gdt::GDT.1.user_code_selector,
-            ferrios::gdt::GDT.1.user_data_selector,
-        );
-    }
+    const USER_CODE: &[u8] = &[
+        0x48, 0x31, 0xC0,           // xor rax, rax
+        0x48, 0xFF, 0xC0,           // inc rax
+        0xEB, 0xFB,                 // jmp -5
+    ];
+
+    thread::uthread::create_user_process(USER_CODE, &mut mapper, &mut frame_allocator).expect("failed to create user process");
 
     println!("Starting the scheduler..");
     scheduler::scheduler();
