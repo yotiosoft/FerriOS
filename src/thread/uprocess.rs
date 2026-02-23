@@ -1,3 +1,4 @@
+use spin::Mutex;
 use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB } };
 use lazy_static::lazy_static;
 
@@ -12,9 +13,43 @@ pub const USER_CODE_START: u64 = 0x0000_1000_0000_0000;
 pub const USER_STACK_TOP: u64 = 0x0000_2000_0000_0000;
 pub const USER_STACK_PAGES: u64 = 4;
 
+/// 最大プロセス数
+pub const NPROCESS: usize = 16;
+
+/// 1プロセスあたりの最大スレッド数
+pub const NTHREAD_PER_PROCESS: usize = 8;
+
+/// Process Control Block (PCB)
+#[derive(Debug, Clone, Copy)]
+pub struct Process {
+    pub pid: usize,
+    pub threads: [Option<usize>; NTHREAD_PER_PROCESS],
+    pub nthread: usize,
+}
+
+impl Process {
+    pub const fn new() -> Self {
+        Process {
+            pid: 0,
+            threads: [None; NTHREAD_PER_PROCESS],
+            nthread: 0,
+        }
+    }
+
+    /// スレッドをプロセスに追加
+    pub fn add_thread(&mut self, tid: usize) -> Result<(), &'static str> {
+        if self.nthread >= NTHREAD_PER_PROCESS {
+            return Err("too many threads in process");
+        }
+        self.threads[self.nthread] = Some(tid);
+        self.nthread += 1;
+        Ok(())
+    }
+}
+
 lazy_static! {
-    /// Process ID
-    static ref NEXT_PID: spin::Mutex<usize> = spin::Mutex::new(0);
+    /// Process Table
+    pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
 pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
@@ -49,15 +84,37 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
     let kstack_top = kstack as u64 + STACK_SIZE as u64;
 
     // Process ID を決定
-    let pid = 0;
+    let pid = next_pid()?;
 
     // init thread を作成
     let thread = uthread::create_user_thread(pid, kstack_top);
 
     // Thread Table に追加
     let tid = thread.tid;
-    let mut table = THREAD_TABLE.lock();
-    table[tid] = thread;
+    let mut thread_table = THREAD_TABLE.lock();
+    thread_table[tid] = thread;
+
+    // Process 構造体を作成
+    let mut process = Process {
+        pid: pid,
+        threads: [None; 8],
+        nthread: 1,
+    };
+    process.add_thread(tid)?;
+
+    // Process Table に追加
+    let mut process_table = PROCESS_TABLE.lock();
+    process_table[pid] = Some(process);
 
     Ok(())
+}
+
+fn next_pid() -> Result<usize, &'static str> {
+    let table = PROCESS_TABLE.lock();
+    for i in 0..NPROCESS-1 {
+        if table[i].is_none() {
+            return Ok(i);
+        }
+    }
+    Err("Process table is full")
 }
