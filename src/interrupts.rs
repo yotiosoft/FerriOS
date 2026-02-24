@@ -63,8 +63,6 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     unsafe {
         if scheduler::SCHEDULER_STARTED {
             scheduler::yield_from_context();
-
-            PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
         }
     }
 }
