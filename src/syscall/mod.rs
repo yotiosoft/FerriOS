@@ -1,4 +1,5 @@
 use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, SFMask};
+use x86_64::structures::gdt::SegmentSelector;
 use x86_64::VirtAddr;
 use crate::gdt;
 use core::arch::naked_asm;
@@ -9,24 +10,24 @@ static mut KERNEL_SYSCALL_RSP_TOP: u64 = 0;
 
 pub fn init() {
     unsafe {
-        Efer::update(|flags| *flags = EferFlags::SYSTEM_CALL_EXTENSIONS);
+        Efer::update(|flags| *flags |= EferFlags::SYSTEM_CALL_EXTENSIONS);
     }
 
     // syscall handler のアドレスを LSTAR に登録
     LStar::write(VirtAddr::new(syscall_entry as u64));
 
     // CC/SS セグメントを START に設定
+    let user_cs_ring0 = SegmentSelector(gdt::GDT.1.user_code_selector.0 & !0b11);
+    let user_ss_ring0 = SegmentSelector(gdt::GDT.1.user_data_selector.0 & !0b11);
     Star::write(
-        gdt::GDT.1.user_code_selector,
-        gdt::GDT.1.user_data_selector,
+        user_cs_ring0,
+        user_ss_ring0,
         gdt::GDT.1.kernel_code_selector,
         gdt::GDT.1.kernel_data_selector,
     ).unwrap();
 
     // カーネル用 syscall スタックをセット
-    let stack_top = unsafe {
-        core::ptr::addr_of!(SYSCALL_STACK) as u64 + (4096 * 4)
-    };
+    let stack_top = core::ptr::addr_of!(SYSCALL_STACK) as u64 + (4096 * 4);
     unsafe {
         KERNEL_SYSCALL_RSP_TOP = stack_top;
     }
