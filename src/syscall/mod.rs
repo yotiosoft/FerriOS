@@ -8,7 +8,6 @@ use crate::cpu::Cpu;
 
 const OFFSET_SAVED_USER_RSP: usize = offset_of!(Cpu, saved_user_rsp);
 const OFFSET_KERNEL_SYSCALL_RSP: usize = offset_of!(Cpu, kernel_syscall_rsp);
-static mut SYSCALL_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
 
 pub fn init() -> Result<(), &'static str> {
     unsafe {
