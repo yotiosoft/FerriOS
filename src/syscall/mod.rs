@@ -1,15 +1,13 @@
 use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, SFMask};
-use x86_64::structures::gdt::SegmentSelector;
 use x86_64::VirtAddr;
-use crate::gdt;
 use core::arch::naked_asm;
+use core::mem::offset_of;
 
-#[unsafe(link_section = ".bss")]
-static mut SAVED_USER_RSP: u64 = 0;
+use crate::gdt;
+use crate::cpu::Cpu;
 
-#[unsafe(link_section = ".data")]
-static mut KERNEL_SYSCALL_RSP_TOP: u64 = 0;
-
+const OFFSET_SAVED_USER_RSP: usize = offset_of!(Cpu, saved_user_rsp);
+const OFFSET_KERNEL_SYSCALL_RSP: usize = offset_of!(Cpu, kernel_syscall_rsp);
 static mut SYSCALL_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
 
 pub fn init() -> Result<(), &'static str> {
@@ -28,12 +26,6 @@ pub fn init() -> Result<(), &'static str> {
         gdt::GDT.1.kernel_data_selector,
     )?;
 
-    // カーネル用 syscall スタックをセット
-    let stack_top = core::ptr::addr_of!(SYSCALL_STACK) as u64 + (4096 * 4) - 8;
-    unsafe {
-        KERNEL_SYSCALL_RSP_TOP = stack_top;
-    }
-
     // syscall 呼び出し時に IF をクリアさせる
     SFMask::write(x86_64::registers::rflags::RFlags::INTERRUPT_FLAG);
 
@@ -43,9 +35,12 @@ pub fn init() -> Result<(), &'static str> {
 #[unsafe(naked)]
 unsafe extern "C" fn syscall_entry() {
     naked_asm!(
+        // カーネル用 GS に切り替え
+        "swapgs",
+
         // ユーザ RSP を退避し、カーネルスタックに切り替え
-        "mov [{user_rsp}], rsp",
-        "mov rsp, [{kernel_rsp}]",
+        "mov gs:[{saved_user_rsp}], rsp",
+        "mov rsp, gs:[{kernel_syscall_rsp}]",
 
         // push する前に syscall番号を別レジスタに退避
         "mov r10, rax",
@@ -88,14 +83,17 @@ unsafe extern "C" fn syscall_entry() {
         "pop rcx",
 
         // ユーザ RSP を復元
-        "mov rsp, [{user_rsp}]",
+        "mov rsp, gs:[{saved_user_rsp}]",
+
+        // ユーザ用 GS に戻す
+        "swapgs",
 
         // ユーザモードに戻る
         "sysretq",
 
-        user_rsp         = sym SAVED_USER_RSP,
-        kernel_rsp       = sym KERNEL_SYSCALL_RSP_TOP,
-        syscall_dispatch = sym syscall_dispatch,
+        saved_user_rsp     = const OFFSET_SAVED_USER_RSP,
+        kernel_syscall_rsp = const OFFSET_KERNEL_SYSCALL_RSP,
+        syscall_dispatch   = sym syscall_dispatch,
     )
 }
 
