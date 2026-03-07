@@ -1,6 +1,8 @@
 use spin::Mutex;
-use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB } };
+use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame } };
 use lazy_static::lazy_static;
+
+use crate::memory;
 
 use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
 
@@ -25,6 +27,7 @@ pub struct Process {
     pub pid: usize,
     pub threads: [Option<usize>; NTHREAD_PER_PROCESS],
     pub nthread: usize,
+    pub page_table: Option<PhysFrame>,
 }
 
 impl Process {
@@ -33,6 +36,7 @@ impl Process {
             pid: 0,
             threads: [None; NTHREAD_PER_PROCESS],
             nthread: 0,
+            page_table: None,
         }
     }
 
@@ -52,17 +56,30 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
+pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(), &'static str> {
     // ユーザページのフラグ
     let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
     // コードページ用領域を用意
     let code_page = Page::containing_address(VirtAddr::new(USER_CODE_START));
     let code_frame = frame_allocator.allocate_frame().expect("frame alloc failed");
-    
+
+    // カーネルスタックを作成
+    let kstack = unsafe {
+        let layout = alloc::alloc::Layout::from_size_align(STACK_SIZE, 16).unwrap();
+        alloc::alloc::alloc(layout)
+    };
+    let kstack_top = kstack as u64 + STACK_SIZE as u64;
+
+    // ユーザページテーブルを作成
+    let (mut user_mapper, page_table) = unsafe {
+        memory::create_user_page_table(frame_allocator, physical_memory_offset)
+    }.ok_or("failed to allocate page table frame")?;
+    drop(mapper);
+
     // コードページにユーザコードをコピー
     unsafe {
-        mapper.map_to(code_page, code_frame, user_flags, frame_allocator).map_err(|_| "code map_to failed")?.flush();
+        user_mapper.map_to(code_page, code_frame, user_flags, frame_allocator).map_err(|_| "code map_to failed")?.flush();
         core::ptr::copy_nonoverlapping(code.as_ptr(), USER_CODE_START as *mut u8, code.len());
     }
 
@@ -72,16 +89,9 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
         let page = Page::containing_address(VirtAddr::new(stack_start + i * 4096));
         let frame = frame_allocator.allocate_frame().ok_or("frame alloc failed")?;
         unsafe {
-            mapper.map_to(page, frame, user_flags, frame_allocator).map_err(|_| "stack map_to failed")?.flush();
+            user_mapper.map_to(page, frame, user_flags, frame_allocator).map_err(|_| "stack map_to failed")?.flush();
         }
     }
-
-    // カーネルスタックを作成
-    let kstack = unsafe {
-        let layout = alloc::alloc::Layout::from_size_align(STACK_SIZE, 16).unwrap();
-        alloc::alloc::alloc(layout)
-    };
-    let kstack_top = kstack as u64 + STACK_SIZE as u64;
 
     // init thread を作成
     let thread = uthread::create_user_thread(kstack_top);
@@ -99,6 +109,7 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
         pid: pid,
         threads: [None; 8],
         nthread: 1,
+        page_table: Some(page_table),
     };
     process.add_thread(tid)?;
 
