@@ -1,9 +1,24 @@
+use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
 use x86_64::structures::paging::{ PageTable, OffsetPageTable, Page, PhysFrame, Mapper, Size4KiB, FrameAllocator };
 use bootloader::bootinfo::{ MemoryMap, MemoryRegionType };
+use spin::Mutex;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
+    pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
+}
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+    // カーネルページテーブルアドレスを取得
+    let (kernel_frame, _) = x86_64::registers::control::Cr3::read();
+    *KERNEL_PAGE_TABLE_FRAME.lock() = Some(kernel_frame);
+
+    // 物理メモリオフセットを取得
+    *PHYSICAL_MEMORY_OFFSET.lock() = Some(physical_memory_offset);
+
     let level_4_table = active_level_4_table(physical_memory_offset);
     OffsetPageTable::new(level_4_table, physical_memory_offset)
 }
@@ -143,4 +158,14 @@ pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<S
     };
 
     Some((new_page_table, new_frame))
+}
+
+/// カーネルページテーブルに切り替え
+pub unsafe fn switch_to_kernel_page_table() {
+    let kernel_frame = KERNEL_PAGE_TABLE_FRAME.lock();
+    if let Some(frame) = *kernel_frame {
+        unsafe {
+            x86_64::registers::control::Cr3::write(frame, Cr3Flags::empty());
+        }
+    }
 }

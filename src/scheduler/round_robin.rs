@@ -1,3 +1,6 @@
+use crate::memory;
+use crate::thread;
+
 use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, cpu::CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
 
@@ -30,7 +33,7 @@ impl super::Scheduler for RoundRobin {
                     continue;
                 }
                 Some(next_tid) => {
-                    let (old_context, new_context) = {
+                    let (old_context, new_context, next_pid) = {
                         // スレッド状態を更新
                         table[next_tid].state = ThreadState::Running;
                         if let Some(current_tid) = cpu.current_tid {
@@ -45,11 +48,45 @@ impl super::Scheduler for RoundRobin {
                         let old_context = &mut cpu.scheduler as *mut Context;
                         let new_context = &table[next_tid].context as *const Context;
 
+                        // CR3 page table switch
+                        if table[next_tid].pid.is_some() {
+                            // ユーザスレッドの場合：プロセスのユーザページテーブルに切り替え
+                            unsafe {
+                                table[next_tid].switch_to_user_page_table();
+                            }
+                        }
+                        else {
+                            // カーネルスレッドの場合：カーネルページテーブルに切り替え
+                            unsafe {
+                                memory::switch_to_kernel_page_table();
+                            }
+                        }
+
+                        let next_pid = table[next_tid].pid;
+
                         drop(cpu);
                         drop(table);
 
-                        (old_context, new_context)
+                        (old_context, new_context, next_pid)
                     };
+
+                    match next_pid {
+                        Some(pid) => {
+                            let process_table = thread::uprocess::PROCESS_TABLE.lock();
+                            if let Some(process) = &process_table[pid] {
+                                if let Some(frame) = process.page_table {
+                                    unsafe {
+                                        x86_64::registers::control::Cr3::write(frame, x86_64::registers::control::Cr3Flags::empty());
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            unsafe {
+                                memory::switch_to_kernel_page_table();
+                            }
+                        }
+                    }
 
                     unsafe {
                         x86_64::instructions::interrupts::enable();
@@ -64,6 +101,11 @@ impl super::Scheduler for RoundRobin {
     /// スレッドからスケジューラに戻る
     fn on_yield(&self) {
         x86_64::instructions::interrupts::disable();
+
+        // カーネルページテーブルに切り替え
+        unsafe {
+            memory::switch_to_kernel_page_table();
+        }
 
         let mut table = THREAD_TABLE.lock();
         let cpu = CPU.lock();

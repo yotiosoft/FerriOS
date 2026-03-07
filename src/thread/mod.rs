@@ -23,6 +23,7 @@ pub enum ThreadState {
 #[derive(Debug, Clone, Copy)]
 pub struct Thread {
     pub tid: usize,             // Thread ID
+    pub pid: Option<usize>,     // Process ID (ユーザプロセスの場合)
     pub state: ThreadState,     // スレッドの状態
     pub context: Context,       // スレッドのコンテキスト
     pub kstack: u64,            // このスレッド用のカーネルスタック
@@ -32,9 +33,25 @@ impl Thread {
     pub fn new() -> Self {
         Thread {
             tid: 0,
+            pid: None,
             state: ThreadState::Unused,
             context: Context::new(),
             kstack: 0,
+        }
+    }
+
+    pub unsafe fn switch_to_user_page_table(&self) {
+        if let Some(pid) = self.pid {
+            let process_table = uprocess::PROCESS_TABLE.lock();
+            let process = &process_table[pid].expect("this process does not have page table yet");
+            let page_table = process.page_table.expect("this process is not in the process_table");
+
+            unsafe {
+                x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
+            }
+        }
+        else {
+            panic!("this process does not have pid");
         }
     }
 }
