@@ -8,7 +8,8 @@
 extern crate alloc;
 
 use ferrios::task::keyboard;
-use bootloader::{ BootInfo, entry_point };
+use bootloader_api::{ BootInfo, entry_point };
+use bootloader_api::config::{BootloaderConfig, Mapping};
 use ferrios::task::serial_input;
 use core::panic::PanicInfo;
 use alloc::{ boxed::Box, vec, vec::Vec, rc::Rc };
@@ -21,10 +22,17 @@ use ferrios::thread;
 use ferrios::scheduler;
 use ferrios::console;
 
-entry_point!(kernel_main);
+static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000); // index 256以上
+    config
+};
+
+entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 /// エントリポイント
-fn kernel_main(boot_info: &'static BootInfo) -> ! {
+fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use ferrios::memory::BootInfoFrameAllocator;
     use x86_64::{ structures::paging::Page, structures::paging::Translate, VirtAddr };
 
@@ -41,10 +49,12 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     println!("console-mode: {:?}", console_mode);
 
     println!("Checking Virtual Memory..");
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let phys_mem_offset = VirtAddr::new(
+        boot_info.physical_memory_offset.into_option().unwrap()
+    );
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe {
-        BootInfoFrameAllocator::init(&boot_info.memory_map)
+        BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
 
     // 未使用のページをマップする
@@ -65,7 +75,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         // stack page
         0x0100_0020_1a10,
         // 物理アドレス 0 にマップされている仮想アドレス
-        boot_info.physical_memory_offset,
+        boot_info.physical_memory_offset.into_option().unwrap(),
     ];
 
     for &address in &addresses {

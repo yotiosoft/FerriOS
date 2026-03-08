@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use bootloader::{entry_point, BootInfo};
+use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use ferrios::allocator::HEAP_SIZE;
 use alloc::{ boxed::Box, vec::Vec };

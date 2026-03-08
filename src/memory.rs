@@ -1,7 +1,7 @@
 use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
 use x86_64::structures::paging::{ PageTable, OffsetPageTable, Page, PhysFrame, Mapper, Size4KiB, FrameAllocator };
-use bootloader::bootinfo::{ MemoryMap, MemoryRegionType };
+use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
 use spin::Mutex;
 use lazy_static::lazy_static;
 
@@ -52,12 +52,12 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 
 /// ブートローダのメモリマップから使用可能なフレームを返す
 pub struct BootInfoFrameAllocator {
-    memory_map: &'static MemoryMap,
+    memory_map: &'static MemoryRegions,
     next: usize,
 }
 impl BootInfoFrameAllocator {
     /// 渡されたメモリマップから FrameAllocator を作る
-    pub unsafe fn init(memory_map: &'static MemoryMap) -> Self {
+    pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
         BootInfoFrameAllocator {
             memory_map,
             next: 0,
@@ -68,9 +68,9 @@ impl BootInfoFrameAllocator {
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
         // メモリマップから利用可能な領域を得る
         let regions = self.memory_map.iter();
-        let usable_regions = regions.filter(|r| r.region_type == MemoryRegionType::Usable);
+        let usable_regions = regions.filter(|r| r.kind == MemoryRegionKind::Usable);
         // それぞれの領域をアドレス範囲に map で変換する
-        let addr_ranges = usable_regions.map(|r| r.range.start_addr()..r.range.end_addr());
+        let addr_ranges = usable_regions.map(|r| r.start..r.end);
         // フレームの開始アドレスのイテレータへと変換する
         let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
         // 開始アドレスから PhysFrame 型を得る
@@ -149,7 +149,7 @@ pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<S
         &mut *new_table_ptr
     };
 
-    for i in 0..512 {
+    for i in 256..512 {
         new_table[i] = current_table[i].clone();
     }
     

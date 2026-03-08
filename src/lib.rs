@@ -26,14 +26,23 @@ pub use libbackend::init::*;
 extern crate alloc;
 
 #[cfg(test)]
-use bootloader::{ entry_point, BootInfo };
+use bootloader_api::{ entry_point, BootInfo };
+use bootloader_api::config::{BootloaderConfig, Mapping};
 
 #[cfg(test)]
-entry_point!(test_kernel_main);
+static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000); // index 256以上
+    config
+};
+
+#[cfg(test)]
+entry_point!(test_kernel_main, config = &crate::BOOTLOADER_CONFIG);
 
 /// test のエントリポイント
 #[cfg(test)]
-fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
+fn test_kernel_main(_boot_info: &'static mut BootInfo) -> ! {
     init();
     test_main();
     hlt_loop();
