@@ -23,7 +23,7 @@ pub struct Console {
 impl Console {
     const fn new() -> Self {
         Console {
-            mode: ConsoleMode::Both,
+            mode: ConsoleMode::Serial,
         }
     }
 
@@ -49,7 +49,7 @@ impl Console {
 
     pub fn update_mode(&mut self) {
         self.mode = if Self::is_serial_avaiable() {
-            ConsoleMode::Both
+            ConsoleMode::Serial
         }
         else {
             ConsoleMode::Vga

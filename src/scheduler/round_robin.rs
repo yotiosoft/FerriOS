@@ -23,12 +23,13 @@ impl super::Scheduler for RoundRobin {
             let next_tid = {
                 find_next_runnable_thread(&table, cpu.current_tid)
             };
+            crate::println!("next_tid: {}", next_tid.unwrap());
 
             match next_tid {
                 None => {
-                    x86_64::instructions::interrupts::enable_and_hlt();
                     drop(cpu);
                     drop(table);
+                    x86_64::instructions::interrupts::enable_and_hlt();
                     continue;
                 }
                 Some(next_tid) => {
@@ -61,6 +62,10 @@ impl super::Scheduler for RoundRobin {
                         let old_context = &mut cpu.scheduler as *mut Context;
                         let new_context = &table[next_tid].context as *const Context;
 
+                        //let ctx = &table[next_tid].context;
+                        //crate::println!("tid={} context: rsp={:#x} rip={:#x} rflags={:#x}",
+                        //    next_tid, ctx.rsp, ctx.rip, ctx.rflags);
+
                         drop(cpu);
                         drop(table);
 
@@ -70,7 +75,7 @@ impl super::Scheduler for RoundRobin {
                     unsafe {
                         x86_64::instructions::interrupts::enable();
                         //crate::println!("switch");
-                        switch_context(old_context, new_context);
+                        switch_context(old_context, new_context);       // interuppts will be enabled here
                     }
                 }
             }
@@ -107,20 +112,25 @@ impl super::Scheduler for RoundRobin {
             let old_context = &mut table[current_tid].context as *mut Context;
             let new_context = &cpu.scheduler as *const Context;
 
+            if current_tid == 1 {
+                let ctx = &table[current_tid].context;
+                crate::println!("tid=1 context: rsp={:#x} rip={:#x} rflags={:#x}",
+                    ctx.rsp, ctx.rip, ctx.rflags);
+            }
+
             drop(cpu);
             drop(table);
 
             (old_context, new_context)
         };
         unsafe {
-            x86_64::instructions::interrupts::enable();
-            switch_context(old_context, new_context);
+            switch_context(old_context, new_context);       // interuppts will be enabled here
         }
     }
 }
 
 fn find_next_runnable_thread(table: &[Thread; NTHREAD], current_tid: Option<usize>) -> Option<usize> {
-    let current_tid = current_tid.unwrap_or(0);
+    let current_tid = current_tid.unwrap_or(NTHREAD - 1);
     for i in 1..NTHREAD+1 {
         let tid = (current_tid + i) % NTHREAD;
         if table[tid].state == ThreadState::Runnable {

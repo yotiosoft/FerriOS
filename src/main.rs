@@ -40,8 +40,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     println!("");
 
     print!("Initializing..");
+    println!("step 1: before init");
     ferrios::init();
+    println!("step 2: after init");
+    println!("step 3: before console init");
     console::init();
+    println!("step 4: after console init");
     scheduler::init(Box::new(scheduler::round_robin::RoundRobin));
     println!("done.");
     
@@ -56,34 +60,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut frame_allocator = unsafe {
         BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
-
-    // 未使用のページをマップする
-    let page = Page::containing_address(VirtAddr::new(0));
-    memory::create_example_mapping(page, &mut mapper, &mut frame_allocator);
-
-    // 新しいマッピングを使って文字列 New! を画面に書き出す
-    let page_ptr: *mut u64 = page.start_address().as_mut_ptr();
-    unsafe {
-        page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)
-    };
-
-    let addresses = [
-        // VGA buffer page
-        0xb8000,
-        // code page
-        0x201008,
-        // stack page
-        0x0100_0020_1a10,
-        // 物理アドレス 0 にマップされている仮想アドレス
-        boot_info.physical_memory_offset.into_option().unwrap(),
-    ];
-
-    for &address in &addresses {
-        let virt = VirtAddr::new(address);
-        let phys = mapper.translate_addr(virt);
-        println!("\t{:?} -> {:?}", virt, phys);
-    }
-    println!("done.");
 
     // allocator 初期化
     println!("Initializing heap memory..");
@@ -112,6 +88,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     print!("Starting kernel threads..");
     thread::kthread::create_kernel_thread(kernel_thread_0);
     thread::kthread::create_kernel_thread(kernel_thread_1);
+    thread::kthread::create_kernel_thread(kernel_thread_2);
     thread::kthread::create_kernel_thread(keyboard_and_serial_input_thread);
     println!("done.");
 
@@ -146,6 +123,18 @@ fn kernel_thread_1() -> ! {
     loop {
         // 割り込みが有効か確認
         println!("Thread 1 running: {}", count);
+        count = count + 1;
+        
+        for _ in 0..1000000 {
+            unsafe { core::arch::asm!("nop"); }
+        }
+    }
+}
+fn kernel_thread_2() -> ! {
+    let mut count = 0;
+    loop {
+        // 割り込みが有効か確認
+        println!("Thread 2 running: {}", count);
         count = count + 1;
         
         for _ in 0..1000000 {

@@ -149,19 +149,25 @@ pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<S
         &mut *new_table_ptr
     };
 
-    for i in 256..512 {
+    for i in 0..512 {
         new_table[i] = current_table[i].clone();
     }
     
     for i in 0..512 {
-    if !current_table[i].is_unused() {
-        crate::println!("entry[{}]: current={:#x} new={:#x}",
-            i,
-            current_table[i].addr().as_u64(),
-            new_table[i].addr().as_u64()
-        );
+        if !current_table[i].is_unused() {
+            crate::println!("entry[{}]: current={:#x} new={:#x}",
+                i,
+                current_table[i].addr().as_u64(),
+                new_table[i].addr().as_u64()
+            );
+        }
+
+        // ユーザ空間のエントリのみクリア
+        let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
+        let user_stack_l4_index = (crate::thread::uprocess::USER_STACK_TOP >> 39) as usize & 0x1FF;   // 64
+        new_table[user_code_l4_index].set_unused();
+        new_table[user_stack_l4_index].set_unused();
     }
-}
 
     let new_page_table = unsafe {
         OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
