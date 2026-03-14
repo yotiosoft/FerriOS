@@ -38,6 +38,7 @@ unsafe extern "C" fn ring3_entry_trampoline() -> ! {
             "push {rflags}",
             "push {cs}",
             "push {rip}",
+            "sti",              // Enable interrupts
             "iretq",            // switch: cs, ss, rsp, rflags
             inout("ax") ss => _,
             cs = in(reg) cs,

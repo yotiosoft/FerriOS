@@ -59,6 +59,19 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     if cpl == 3 {
         println!("Ring 3 confirmed! rip={:#x}", stack_frame.instruction_pointer);
     }
+    
+    if let Some(0) = crate::cpu::CPU.lock().current_tid {
+        crate::println!("timer interrupt at tid=0: rip={:#x}", 
+            stack_frame.instruction_pointer);
+    }
+    if let Some(1) = crate::cpu::CPU.lock().current_tid {
+        crate::println!("timer interrupt at tid=1: rip={:#x}", 
+            stack_frame.instruction_pointer);
+    }
+    if let Some(2) = crate::cpu::CPU.lock().current_tid {
+        crate::println!("timer interrupt at tid=2: rip={:#x}", 
+            stack_frame.instruction_pointer);
+    }
 
     unsafe {
         if scheduler::SCHEDULER_STARTED {

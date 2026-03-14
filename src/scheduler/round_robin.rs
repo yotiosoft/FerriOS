@@ -8,6 +8,8 @@ pub struct RoundRobin;
 impl super::Scheduler for RoundRobin {
     /// スケジューラ
     fn scheduler(&self) -> ! {
+        x86_64::instructions::interrupts::disable();
+
         unsafe {
             if SCHEDULER_STARTED {
                 panic!("Scheduler already started");
@@ -23,7 +25,6 @@ impl super::Scheduler for RoundRobin {
             let next_tid = {
                 find_next_runnable_thread(&table, cpu.current_tid)
             };
-            crate::println!("next_tid: {}", next_tid.unwrap());
 
             match next_tid {
                 None => {
@@ -73,9 +74,8 @@ impl super::Scheduler for RoundRobin {
                     };
 
                     unsafe {
-                        x86_64::instructions::interrupts::enable();
                         //crate::println!("switch");
-                        switch_context(old_context, new_context);       // interuppts will be enabled here
+                        switch_context(old_context, new_context);
                     }
                 }
             }
@@ -112,20 +112,16 @@ impl super::Scheduler for RoundRobin {
             let old_context = &mut table[current_tid].context as *mut Context;
             let new_context = &cpu.scheduler as *const Context;
 
-            if current_tid == 1 {
-                let ctx = &table[current_tid].context;
-                crate::println!("tid=1 context: rsp={:#x} rip={:#x} rflags={:#x}",
-                    ctx.rsp, ctx.rip, ctx.rflags);
-            }
-
             drop(cpu);
             drop(table);
 
             (old_context, new_context)
         };
         unsafe {
-            switch_context(old_context, new_context);       // interuppts will be enabled here
+            switch_context(old_context, new_context);
         }
+
+        x86_64::instructions::interrupts::enable();
     }
 }
 
