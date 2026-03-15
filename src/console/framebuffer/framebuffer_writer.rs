@@ -1,8 +1,10 @@
+// Refer to: https://github.com/rust-osdev/bootloader/blob/1d4166141c22c9aaab0136f20305a26093c9a981/common/src/framebuffer.rs
+
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
 
 /// フォントの設定
-const FONT_WEIGHT: FontWeight = FontWeight::Regular;
+const FONT_WEIGHT: FontWeight = FontWeight::Bold;
 const RASTER_HEIGHT: RasterHeight = RasterHeight::Size16;
 const CHAR_WIDTH: usize = 8; // Size16 の Regular は幅 8px
 const LINE_HEIGHT: usize = 16;
@@ -24,7 +26,7 @@ impl FrameBufferWriter {
             x_pos: 0,
             y_pos: 0,
             color: [255, 255, 0],
-            weight: FontWeight::Bold,
+            weight: FONT_WEIGHT,
         }
     }
 
