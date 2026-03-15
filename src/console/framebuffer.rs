@@ -104,6 +104,7 @@ static FONT: [[u8; 8]; 95] = [
 
 const CHAR_WIDTH: usize = 8;
 const CHAR_HEIGHT: usize = 8;
+const SCALE: usize = 2;
 
 pub struct FrameBufferWriter {
     buffer: &'static mut [u8],
@@ -118,11 +119,11 @@ impl FrameBufferWriter {
     }
 
     fn width_in_chars(&self) -> usize {
-        self.info.width as usize / CHAR_WIDTH
+        self.info.width as usize / (CHAR_WIDTH * SCALE)
     }
 
     fn height_in_chars(&self) -> usize {
-        self.info.height as usize / CHAR_HEIGHT
+        self.info.height as usize / (CHAR_HEIGHT * SCALE)
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, r: u8, g: u8, b: u8) {
@@ -165,13 +166,18 @@ impl FrameBufferWriter {
                 } else {
                     &FONT[0]  // space
                 };
-                let px = self.col * CHAR_WIDTH;
-                let py = self.row * CHAR_HEIGHT;
+                let px = self.col * CHAR_WIDTH * SCALE;
+                let py = self.row * CHAR_HEIGHT * SCALE;
                 for (row, &bits) in glyph.iter().enumerate() {
-                    for col in 0..8 {
-                        let set = (bits >> (7 - col)) & 1 != 0;
+                    for col in 0..8usize {
+                        let set = (bits >> col) & 1 != 0;
                         let (r, g, b) = if set { (255, 255, 0) } else { (0, 0, 0) };
-                        self.write_pixel(px + col, py + row, r, g, b);
+                        // SCALE x SCALE のブロックで描画
+                        for sy in 0..SCALE {
+                            for sx in 0..SCALE {
+                                self.write_pixel(px + col * SCALE + sx, py + row * SCALE + sy, r, g, b);
+                            }
+                        }
                     }
                 }
                 self.col += 1;
@@ -190,7 +196,7 @@ impl FrameBufferWriter {
     fn scroll(&mut self) {
         let bpp = self.info.bytes_per_pixel as usize;
         let stride = self.info.stride as usize;
-        let row_bytes = stride * bpp * CHAR_HEIGHT;
+        let row_bytes = stride * bpp * CHAR_HEIGHT * SCALE;  // SCALE を追加
         let total = stride * bpp * self.info.height as usize;
         self.buffer.copy_within(row_bytes..total, 0);
         let clear_start = total - row_bytes;

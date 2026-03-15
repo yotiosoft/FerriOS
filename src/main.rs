@@ -44,7 +44,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     ferrios::init();
     println!("step 2: after init");
     println!("step 3: before console init");
-    console::init();
+    console::init(&mut boot_info.framebuffer);
     println!("step 4: after console init");
     scheduler::init(Box::new(scheduler::round_robin::RoundRobin));
     println!("done.");
