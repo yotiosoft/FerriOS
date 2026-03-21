@@ -32,8 +32,11 @@ use bootloader_api::config::{BootloaderConfig, Mapping};
 #[cfg(test)]
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
-    config.mappings.physical_memory = Some(Mapping::Dynamic);
-    config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000); // index 256以上
+    config.mappings.physical_memory = Some(Mapping::FixedAddress(0xFFFF_A000_0000_0000)); // index 308
+    config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000);           // index 256
+    config.mappings.kernel_stack = Mapping::FixedAddress(0xFFFF_9000_0000_0000);          // index 288
+    config.mappings.framebuffer = Mapping::FixedAddress(0xFFFF_B000_0000_0000);           // index 324
+    config.mappings.boot_info = Mapping::FixedAddress(0xFFFF_C000_0000_0000); 
     config
 };
 
