@@ -47,5 +47,6 @@ entry_point!(test_kernel_main, config = &crate::BOOTLOADER_CONFIG);
 fn test_kernel_main(_boot_info: &'static mut BootInfo) -> ! {
     init();
     test_main();
+    exit_qemu(QemuExitCode::Success);
     hlt_loop();
 }

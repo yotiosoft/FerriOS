@@ -6,16 +6,13 @@
 
 use core::panic::PanicInfo;
 use ferrios::println;
+use bootloader_api::{entry_point, BootInfo};
 
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+entry_point!(kernel_main, config = &ferrios::BOOTLOADER_CONFIG);
+
+fn kernel_main(_boot_info: &'static mut BootInfo) -> ! {
     test_main();
-
     loop {}
-}
-
-fn test_runner(tests: &[&dyn Fn()]) {
-    unimplemented!();
 }
 
 #[panic_handler]

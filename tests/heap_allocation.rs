@@ -9,6 +9,7 @@ extern crate alloc;
 use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use ferrios::allocator::HEAP_SIZE;
+use ferrios::{ exit_qemu, hlt_loop, QemuExitCode };
 use alloc::{ boxed::Box, vec::Vec };
 
 entry_point!(main, config = &ferrios::BOOTLOADER_CONFIG);
@@ -70,5 +71,6 @@ fn main(boot_info: &'static mut BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     test_main();
-    loop {}
+    exit_qemu(QemuExitCode::Success);
+    hlt_loop();
 }
