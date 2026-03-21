@@ -29,8 +29,7 @@ extern crate alloc;
 use bootloader_api::{ entry_point, BootInfo };
 use bootloader_api::config::{BootloaderConfig, Mapping};
 
-#[cfg(test)]
-static BOOTLOADER_CONFIG: BootloaderConfig = {
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::FixedAddress(0xFFFF_A000_0000_0000)); // index 308
     config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000);           // index 256

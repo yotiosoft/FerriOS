@@ -11,7 +11,7 @@ use core::panic::PanicInfo;
 use ferrios::allocator::HEAP_SIZE;
 use alloc::{ boxed::Box, vec::Vec };
 
-entry_point!(main);
+entry_point!(main, config = &ferrios::BOOTLOADER_CONFIG);
 
 #[test_case]
 fn simple_allocation() {
@@ -54,18 +54,18 @@ fn panic(info: &PanicInfo) -> ! {
     ferrios::test_panic_handler(info)
 }
 
-fn main(boot_info: &'static BootInfo) -> ! {
+fn main(boot_info: &'static mut BootInfo) -> ! {
     use ferrios::allocator;
     use ferrios::memory::{self, BootInfoFrameAllocator};
     use x86_64::VirtAddr;
 
     ferrios::init();
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
+    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap());
     let mut mapper = unsafe {
         memory::init(phys_mem_offset)
     };
     let mut frame_allocator = unsafe {
-        BootInfoFrameAllocator::init(&boot_info.memory_map)
+        BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
