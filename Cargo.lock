@@ -178,7 +178,6 @@ dependencies = [
 name = "ferrios"
 version = "0.1.0"
 dependencies = [
- "bootloader",
  "bootloader_api",
  "conquer-once",
  "crossbeam-queue",
@@ -192,6 +191,13 @@ dependencies = [
  "uart_16550",
  "volatile 0.2.7",
  "x86_64",
+]
+
+[[package]]
+name = "ferrios-runner"
+version = "0.1.0"
+dependencies = [
+ "bootloader",
 ]
 
 [[package]]

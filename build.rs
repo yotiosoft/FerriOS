@@ -1,51 +1,52 @@
 use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let kernel_manifest = PathBuf::from(&manifest_dir).join("kernel/Cargo.toml");
+    let target_dir = PathBuf::from(&manifest_dir).join("target/kernel-build");
+
+    // --release かどうか検知
+    let profile = std::env::var("PROFILE").unwrap();
+    let is_release = profile == "release";
+
+    let mut args = vec![
+        "+nightly".to_string(),
+        "build".to_string(),
+        "--manifest-path".to_string(),
+        kernel_manifest.to_str().unwrap().to_string(),
+        "--target".to_string(),
+        "x86_64-unknown-none".to_string(),
+        "-Zbuild-std=core,compiler_builtins,alloc".to_string(),
+        "-Zbuild-std-features=compiler-builtins-mem".to_string(),
+        "--target-dir".to_string(),
+        target_dir.to_str().unwrap().to_string(),
+    ];
+    if is_release {
+        args.push("--release".to_string());
+    }
+
+    let status = Command::new("cargo")
+        .args(&args)
+        .status()
+        .expect("failed to build kernel");
+
+    assert!(status.success(), "kernel build failed");
+
+    // debug or release
+    let profile_dir = if is_release { "release" } else { "debug" };
+    let kernel = target_dir
+        .join(format!("x86_64-unknown-none/{profile_dir}/ferrios"));
+
+    println!("cargo:rerun-if-changed={}", kernel_manifest.display());
+    println!("cargo:rerun-if-changed=kernel/src");
+
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    
-    let target_dir = out_dir
-        .parent().unwrap()  // out
-        .parent().unwrap()  // ferrios-xxx
-        .parent().unwrap()  // build
-        .parent().unwrap()  // debug or release
-        .to_path_buf();
-    
-    // カーネルバイナリ
-    let kernel = target_dir.join("ferrios");
-    println!("cargo:rerun-if-changed={}", kernel.display());
+    let bios_path = out_dir.join("bios.img");
 
-    if kernel.exists() {
-        let bios_path = out_dir.join("bios.img");
-        bootloader::BiosBoot::new(&kernel)
-            .create_disk_image(&bios_path)
-            .unwrap();
-        println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
-    } else {
-        eprintln!("Kernel binary not found, skipping disk image creation");
-    }
+    bootloader::BiosBoot::new(&kernel)
+        .create_disk_image(&bios_path)
+        .unwrap();
 
-    // テストバイナリ 
-    let deps_dir = target_dir.join("deps");
-    if let Ok(entries) = std::fs::read_dir(&deps_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_none() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("ferrios-")
-                        || name.starts_with("basic_boot-")
-                        || name.starts_with("heap_allocation-")
-                        || name.starts_with("stack_overflow-")
-                        || name.starts_with("should_panic-")
-                        || name.starts_with("kernel_threads-")
-                    {
-                        let img_path = out_dir.join(format!("{}.img", name));
-                        match bootloader::BiosBoot::new(&path).create_disk_image(&img_path) {
-                            Ok(_) => println!("cargo:warning=Created test image: {}", img_path.display()),
-                            Err(e) => eprintln!("Failed to create image for {}: {}", name, e),
-                        }
-                    }
-                }
-            }
-        }
-    }
+    println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
 }
