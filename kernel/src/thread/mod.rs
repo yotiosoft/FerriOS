@@ -41,21 +41,6 @@ impl Thread {
             entry: None,
         }
     }
-
-    pub unsafe fn switch_to_user_page_table(&self) {
-        if let Some(pid) = self.pid {
-            let process_table = uprocess::PROCESS_TABLE.lock();
-            let process = &process_table[pid].expect("this process does not have page table yet");
-            let page_table = process.page_table.expect("this process is not in the process_table");
-
-            unsafe {
-                x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
-            }
-        }
-        else {
-            panic!("this process does not have pid");
-        }
-    }
 }
 
 pub const NTHREAD: usize = 64;

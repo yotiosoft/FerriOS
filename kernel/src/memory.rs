@@ -4,6 +4,7 @@ use x86_64::structures::paging::{ PageTable, OffsetPageTable, Page, PhysFrame, M
 use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
 use spin::Mutex;
 use lazy_static::lazy_static;
+use crate::thread;
 
 lazy_static! {
     pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
@@ -173,5 +174,21 @@ pub unsafe fn switch_to_kernel_page_table() {
         unsafe {
             x86_64::registers::control::Cr3::write(frame, Cr3Flags::empty());
         }
+    }
+}
+
+/// ユーザプロセスのページテーブルに切り替え
+pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
+    if let Some(pid) = thread.pid {
+        let process_table = thread::uprocess::PROCESS_TABLE.lock();
+        let process = &process_table[pid].expect("this process does not have page table yet");
+        let page_table = process.page_table.expect("this process is not in the process_table");
+
+        unsafe {
+            x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
+        }
+    }
+    else {
+        panic!("this process does not have pid");
     }
 }

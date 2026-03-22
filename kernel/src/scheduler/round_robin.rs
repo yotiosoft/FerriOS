@@ -50,7 +50,7 @@ impl super::Scheduler for RoundRobin {
                         if table[next_tid].pid.is_some() {
                             // ユーザスレッドの場合：プロセスのユーザページテーブルに切り替え
                             unsafe {
-                                table[next_tid].switch_to_user_page_table();
+                                memory::switch_to_user_page_table(&table[next_tid]);
                             }
                         }
                         else {
