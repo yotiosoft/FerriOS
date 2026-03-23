@@ -1,9 +1,25 @@
+use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
 use x86_64::structures::paging::{ PageTable, OffsetPageTable, Page, PhysFrame, Mapper, Size4KiB, FrameAllocator };
-use bootloader::bootinfo::{ MemoryMap, MemoryRegionType };
+use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
+use spin::Mutex;
+use lazy_static::lazy_static;
+use crate::thread;
+
+lazy_static! {
+    pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
+    pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
+}
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+    // カーネルページテーブルアドレスを取得
+    let (kernel_frame, _) = x86_64::registers::control::Cr3::read();
+    *KERNEL_PAGE_TABLE_FRAME.lock() = Some(kernel_frame);
+
+    // 物理メモリオフセットを取得
+    *PHYSICAL_MEMORY_OFFSET.lock() = Some(physical_memory_offset);
+
     let level_4_table = active_level_4_table(physical_memory_offset);
     OffsetPageTable::new(level_4_table, physical_memory_offset)
 }
@@ -37,12 +53,12 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 
 /// ブートローダのメモリマップから使用可能なフレームを返す
 pub struct BootInfoFrameAllocator {
-    memory_map: &'static MemoryMap,
+    memory_map: &'static MemoryRegions,
     next: usize,
 }
 impl BootInfoFrameAllocator {
     /// 渡されたメモリマップから FrameAllocator を作る
-    pub unsafe fn init(memory_map: &'static MemoryMap) -> Self {
+    pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
         BootInfoFrameAllocator {
             memory_map,
             next: 0,
@@ -53,9 +69,9 @@ impl BootInfoFrameAllocator {
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
         // メモリマップから利用可能な領域を得る
         let regions = self.memory_map.iter();
-        let usable_regions = regions.filter(|r| r.region_type == MemoryRegionType::Usable);
+        let usable_regions = regions.filter(|r| r.kind == MemoryRegionKind::Usable);
         // それぞれの領域をアドレス範囲に map で変換する
-        let addr_ranges = usable_regions.map(|r| r.range.start_addr()..r.range.end_addr());
+        let addr_ranges = usable_regions.map(|r| r.start..r.end);
         // フレームの開始アドレスのイテレータへと変換する
         let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
         // 開始アドレスから PhysFrame 型を得る
@@ -108,4 +124,71 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
 
     // 目的の物理アドレスを計算
     Some(frame.start_address() + u64::from(addr.page_offset()))
+}
+
+/// ユーザ用ページテーブルを作成する
+/// カーネル領域は現在（カーネル）のページテーブルからコピーする
+pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Option<(OffsetPageTable<'static>, PhysFrame)> {
+    // 新しい level-4 フレームを allocate
+    let new_frame = frame_allocator.allocate_frame()?;
+
+    // 新しいページテーブルを初期化
+    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
+    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
+    unsafe {
+        new_table_ptr.write(PageTable::new());
+    }
+
+    // カーネル用領域 をコピー
+    let (current_frame, _) = x86_64::registers::control::Cr3::read();
+    let current_va = physical_memory_offset + current_frame.start_address().as_u64();
+    let current_table_ptr: *const PageTable = current_va.as_ptr();
+    let current_table = unsafe {
+        &*current_table_ptr
+    };
+    let new_table = unsafe {
+        &mut *new_table_ptr
+    };
+
+    for i in 256..512 {
+        new_table[i] = current_table[i].clone();
+    }
+
+    // ユーザ空間のエントリのみクリア
+    let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
+    let user_stack_l4_index = (crate::thread::uprocess::USER_STACK_TOP >> 39) as usize & 0x1FF;   // 64
+    new_table[user_code_l4_index].set_unused();
+    new_table[user_stack_l4_index].set_unused();
+
+    let new_page_table = unsafe {
+        OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
+    };
+
+    Some((new_page_table, new_frame))
+}
+
+/// カーネルページテーブルに切り替え
+pub unsafe fn switch_to_kernel_page_table() {
+    let kernel_frame = KERNEL_PAGE_TABLE_FRAME.lock();
+    if let Some(frame) = *kernel_frame {
+        unsafe {
+            x86_64::registers::control::Cr3::write(frame, Cr3Flags::empty());
+        }
+    }
+}
+
+/// ユーザプロセスのページテーブルに切り替え
+pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
+    if let Some(pid) = thread.pid {
+        let process_table = thread::uprocess::PROCESS_TABLE.lock();
+        let process = &process_table[pid].expect("this process does not have page table yet");
+        let page_table = process.page_table.expect("this process is not in the process_table");
+
+        unsafe {
+            x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
+        }
+    }
+    else {
+        panic!("this process does not have pid");
+    }
 }

@@ -1,3 +1,5 @@
+use crate::memory;
+
 use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, cpu::CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
 
@@ -6,6 +8,8 @@ pub struct RoundRobin;
 impl super::Scheduler for RoundRobin {
     /// スケジューラ
     fn scheduler(&self) -> ! {
+        x86_64::instructions::interrupts::disable();
+
         unsafe {
             if SCHEDULER_STARTED {
                 panic!("Scheduler already started");
@@ -24,9 +28,9 @@ impl super::Scheduler for RoundRobin {
 
             match next_tid {
                 None => {
-                    x86_64::instructions::interrupts::enable_and_hlt();
                     drop(cpu);
                     drop(table);
+                    x86_64::instructions::interrupts::enable_and_hlt();
                     continue;
                 }
                 Some(next_tid) => {
@@ -42,6 +46,20 @@ impl super::Scheduler for RoundRobin {
                         // CPU で実行中のスレッド ID を更新
                         cpu.current_tid = Some(next_tid);
                         
+                        // CR3 page table switch
+                        if table[next_tid].pid.is_some() {
+                            // ユーザスレッドの場合：プロセスのユーザページテーブルに切り替え
+                            unsafe {
+                                memory::switch_to_user_page_table(&table[next_tid]);
+                            }
+                        }
+                        else {
+                            // カーネルスレッドの場合：カーネルページテーブルに切り替え
+                            unsafe {
+                                memory::switch_to_kernel_page_table();
+                            }
+                        }
+                        
                         let old_context = &mut cpu.scheduler as *mut Context;
                         let new_context = &table[next_tid].context as *const Context;
 
@@ -55,7 +73,6 @@ impl super::Scheduler for RoundRobin {
                     };
 
                     unsafe {
-                        x86_64::instructions::interrupts::enable();
                         //crate::println!("switch");
                         switch_context(old_context, new_context);
                     }
@@ -67,6 +84,11 @@ impl super::Scheduler for RoundRobin {
     /// スレッドからスケジューラに戻る
     fn on_yield(&self) {
         x86_64::instructions::interrupts::disable();
+
+        // カーネルページテーブルに切り替え
+        unsafe {
+            memory::switch_to_kernel_page_table();
+        }
 
         let mut table = THREAD_TABLE.lock();
         let cpu = CPU.lock();
@@ -95,14 +117,15 @@ impl super::Scheduler for RoundRobin {
             (old_context, new_context)
         };
         unsafe {
-            x86_64::instructions::interrupts::enable();
             switch_context(old_context, new_context);
         }
+
+        x86_64::instructions::interrupts::enable();
     }
 }
 
 fn find_next_runnable_thread(table: &[Thread; NTHREAD], current_tid: Option<usize>) -> Option<usize> {
-    let current_tid = current_tid.unwrap_or(0);
+    let current_tid = current_tid.unwrap_or(NTHREAD - 1);
     for i in 1..NTHREAD+1 {
         let tid = (current_tid + i) % NTHREAD;
         if table[tid].state == ThreadState::Runnable {

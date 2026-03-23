@@ -21,6 +21,7 @@ pub fn create_kernel_thread(entry: fn() -> !) {
 
     // コンテキストを初期化する
     table[tid].context.rsp = stack_top;
-    table[tid].context.rip = entry as u64;
+    table[tid].context.rip = super::kthread_entry as u64;
+    table[tid].entry = Some(entry);
     table[tid].context.rflags = 0x200;  // IF (Interrupt Flag) を有効化
 }

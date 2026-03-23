@@ -23,18 +23,22 @@ pub enum ThreadState {
 #[derive(Debug, Clone, Copy)]
 pub struct Thread {
     pub tid: usize,             // Thread ID
+    pub pid: Option<usize>,     // Process ID (ユーザプロセスの場合)
     pub state: ThreadState,     // スレッドの状態
     pub context: Context,       // スレッドのコンテキスト
     pub kstack: u64,            // このスレッド用のカーネルスタック
+    pub entry: Option<fn() -> !>,       // 実行する関数
 }
 
 impl Thread {
     pub fn new() -> Self {
         Thread {
             tid: 0,
+            pid: None,
             state: ThreadState::Unused,
             context: Context::new(),
             kstack: 0,
+            entry: None,
         }
     }
 }
@@ -64,4 +68,19 @@ pub fn next_tid() -> Option<usize> {
 pub fn current_tid() -> Option<usize> {
     let cpu = cpu::CPU.lock();
     cpu.current_tid
+}
+
+/// スケジューラからきりかわた直後に一度だけ実行される関数
+/// 割り込みを有効化
+extern "C" fn kthread_entry() -> ! {
+    x86_64::instructions::interrupts::enable();
+    
+    // 実際のスレッド関数を呼び出す
+    let entry = {
+        let table = THREAD_TABLE.lock();
+        let cpu = cpu::CPU.lock();
+        let tid = cpu.current_tid.unwrap();
+        table[tid].entry.expect("entry not set")
+    };
+    entry();
 }

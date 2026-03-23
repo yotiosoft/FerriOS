@@ -65,6 +65,10 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
             scheduler::yield_from_context();
         }
     }
+
+    if cpl == 3 {
+        unsafe { core::arch::asm!("swapgs"); }
+    }
 }
 
 /// キーボード割り込みハンドラ

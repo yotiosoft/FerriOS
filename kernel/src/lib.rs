@@ -1,0 +1,53 @@
+#![no_std]
+#![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+#![feature(abi_x86_interrupt)]
+#![feature(alloc_error_handler)]
+#![feature(naked_functions)]
+
+pub mod interrupts;
+pub mod gdt;
+pub mod memory;
+pub mod allocator;
+pub mod task;
+pub mod thread;
+pub mod cpu;
+pub mod console;
+pub mod scheduler;
+pub mod syscall;
+
+mod libbackend;
+pub use libbackend::exit::*;
+pub use libbackend::test::*;
+pub use libbackend::error_handlers::*;
+pub use libbackend::init::*;
+
+extern crate alloc;
+
+#[cfg(test)]
+use bootloader_api::{ entry_point, BootInfo };
+use bootloader_api::config::{BootloaderConfig, Mapping};
+
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::FixedAddress(0xFFFF_A000_0000_0000)); // index 308
+    config.mappings.kernel_base = Mapping::FixedAddress(0xFFFF_8000_0000_0000);           // index 256
+    config.mappings.kernel_stack = Mapping::FixedAddress(0xFFFF_9000_0000_0000);          // index 288
+    config.mappings.framebuffer = Mapping::FixedAddress(0xFFFF_B000_0000_0000);           // index 324
+    config.mappings.boot_info = Mapping::FixedAddress(0xFFFF_C000_0000_0000); 
+    config
+};
+
+#[cfg(test)]
+entry_point!(test_kernel_main, config = &crate::BOOTLOADER_CONFIG);
+
+/// test のエントリポイント
+#[cfg(test)]
+fn test_kernel_main(_boot_info: &'static mut BootInfo) -> ! {
+    init();
+    test_main();
+    exit_qemu(QemuExitCode::Success);
+    hlt_loop();
+}
