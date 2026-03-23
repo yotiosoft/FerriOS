@@ -1,5 +1,5 @@
 use super::exit::*;
-use super::super::{ gdt, interrupts, syscall, serial_println };
+use super::super::{ gdt, interrupts, cpu, syscall, serial_println };
 use crate::hlt_loop;
 use core::panic::PanicInfo;
 
@@ -9,6 +9,8 @@ extern crate alloc;
 /// IDT の初期化
 pub fn init() {
     gdt::init();
+    cpu::init();
+    syscall::init().expect("syscall init error");
     interrupts::init_idt();
     unsafe {
         interrupts::PICS.lock().initialize();

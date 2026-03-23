@@ -30,5 +30,8 @@ pub fn init() {
     use x86_64::VirtAddr;
 
     let cpu_ptr = &*CPU.lock() as *const Cpu as u64;
+    crate::println!("cpu_ptr: {:#x}", cpu_ptr);
+    crate::println!("kernel_syscall_rsp offset: {}", core::mem::offset_of!(Cpu, kernel_syscall_rsp));
     KernelGsBase::write(VirtAddr::new(cpu_ptr));
+    crate::println!("KernelGsBase written: {:#x}", KernelGsBase::read().as_u64());
 }
