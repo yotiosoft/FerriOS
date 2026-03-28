@@ -1,6 +1,6 @@
 use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
-use x86_64::structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB };
+use x86_64::structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB, page_table::PageTableEntry };
 use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
 use spin::Mutex;
 use lazy_static::lazy_static;
@@ -24,33 +24,10 @@ const PX_MASK: usize = 0x1ff;
 
 const PGSIZE_MASK: usize = 0xFFF;
 
-#[macro_export]
-macro_rules! pdx {
-    ($va:expr) => {
-        (($va.as_u64() as usize) >> PDX_SHIFT) & PX_MASK
-    };
-}
-
-#[macro_export]
-macro_rules! ptx {
-    ($va:expr) => {
-        (($va.as_u64() as usize) >> PTX_SHIFT) & PX_MASK
-    };
-}
-
-#[macro_export]
-macro_rules! p2v {
-    ($a:expr) => {
-        (($a as usize).wrapping_add(PHYSICAL_KERNEL_BASE as usize)) as *mut u8
-    };
-}
-
-#[macro_export]
-macro_rules! pte_addr {
-    ($pte:expr) => {
-        ($pte.as_u64() as usize) & !PGSIZE_MASK
-    };
-}
+fn pml4_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 39) & 0x1FF }
+fn pdpt_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 30) & 0x1FF }
+fn pd_index  (va: VirtAddr) -> usize { (va.as_u64() as usize >> 21) & 0x1FF }
+fn pt_index  (va: VirtAddr) -> usize { (va.as_u64() as usize >> 12) & 0x1FF }
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
@@ -61,8 +38,10 @@ pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static>
     // 物理メモリオフセットを取得
     *PHYSICAL_MEMORY_OFFSET.lock() = Some(physical_memory_offset);
 
-    let level_4_table = active_level_4_table(physical_memory_offset);
-    OffsetPageTable::new(level_4_table, physical_memory_offset)
+    unsafe {
+        let level_4_table = active_level_4_table(physical_memory_offset);
+        OffsetPageTable::new(level_4_table, physical_memory_offset)
+    }
 }
 
 /// 与えられた仮想アドレスを対応する物理アドレスに変換
@@ -277,14 +256,83 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_me
     Ok((new_page_table, new_frame))
 }
 
-/// PageTable を walk して仮想アドレスに対応する PTE を取得する
-/// alloc == true の場合、なければ allocate する
-fn walk_pagetable(pagetable: &PageTable, virtual_address: &VirtAddr) -> Option<PageTable> {
-    let pagetable_entry = &pagetable[pdx!(virtual_address)];
+/// 物理アドレス → 仮想アドレス変換
+/// physical_memory_offset を使う
+unsafe fn phys_to_virt(phys: PhysAddr, physical_memory_offset: VirtAddr) -> VirtAddr {
+    VirtAddr::new(physical_memory_offset.as_u64() + phys.as_u64())
+}
 
-    //if pagetable_entry.flags().contains(PageTableFlags::PRESENT) {
-    //    let target_pagetable = p2v!(pte_addr!(pagetable_entry.addr()));
-    //}
+/// PageTableEntry の物理アドレスを取得
+/// フラグビットを除く
+fn entry_phys_addr(entry: &PageTableEntry) -> PhysAddr {
+    PhysAddr::new(entry.addr().as_u64())
+}
 
-    None
+/// xv6 の walkpgdir に相当する 4段ページテーブルウォーカー
+/// `va` に対応する PT エントリへの可変参照を返す
+/// `alloc == true` の場合、途中のテーブルが存在しなければ新たにフレームを割り当てる
+///
+/// # Safety
+/// - `pml4` は有効な PML4 テーブルへの可変参照でなければならない
+/// - `physical_memory_offset` はブートローダから受け取った物理メモリオフセットでなければならない
+/// - `alloc == true` の場合、frame_allocator が有効なフレームを返すことを仮定する
+pub unsafe fn walk_pagetable<'a, A>(pml4: &'a mut PageTable, va: VirtAddr, alloc: bool, physical_memory_offset: VirtAddr, frame_allocator: &mut A) -> Option<&'a mut PageTableEntry>
+where
+    A: FrameAllocator<Size4KiB>,
+{
+    // Level 4 (PML4) to Level 3 (PDPT)
+    let pdpt: &mut PageTable = {
+        let entry = &mut pml4[pml4_index(va)];
+        if !entry.flags().contains(PageTableFlags::PRESENT) {
+            if !alloc {
+                return None;
+            }
+            let frame = frame_allocator.allocate_frame()?;
+            let table_virt = unsafe { phys_to_virt(frame.start_address(), physical_memory_offset) };
+            unsafe {
+                (table_virt.as_mut_ptr::<PageTable>()).write(PageTable::new());
+            }
+            entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
+        }
+        let phys = entry_phys_addr(entry);
+        unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
+    };
+
+    // Level 3 (PDPT) to Level 2 (PD)
+    let pd: &mut PageTable = {
+        let entry = &mut pdpt[pdpt_index(va)];
+        if !entry.flags().contains(PageTableFlags::PRESENT) {
+            if !alloc {
+                return None;
+            }
+            let frame = frame_allocator.allocate_frame()?;
+            let table_virt = unsafe { phys_to_virt(frame.start_address(), physical_memory_offset) };
+            unsafe {
+                (table_virt.as_mut_ptr::<PageTable>()).write(PageTable::new());
+            }
+            entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
+        }
+        let phys = entry_phys_addr(entry);
+        unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
+    };
+
+    // Level 2 (PD) to Level 1 (PT)
+    let pt: &mut PageTable = {
+        let entry = &mut pd[pd_index(va)];
+        if !entry.flags().contains(PageTableFlags::PRESENT) {
+            if !alloc {
+                return None;
+            }
+            let frame = frame_allocator.allocate_frame()?;
+            let table_virt = unsafe { phys_to_virt(frame.start_address(), physical_memory_offset) };
+            unsafe {
+                (table_virt.as_mut_ptr::<PageTable>()).write(PageTable::new());
+            }
+            entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
+        }
+        let phys = entry_phys_addr(entry);
+        unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
+    };
+
+    Some(&mut pt[pt_index(va)])
 }
