@@ -1,3 +1,6 @@
+use crate::println;
+use crate::thread;
+
 /// Rustから呼ばれるディスパッチャ
 /// 戻り値はRAXに入る
 #[unsafe(no_mangle)]
@@ -5,6 +8,7 @@ pub extern "C" fn syscall_dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3:
     match syscall_num {
         super::SYS_PRINT_NUM => sys_print_num(arg1),
         super::SYS_PRINT_STR => sys_print_str(arg1, arg2),
+        super::SYS_FORK => sys_fork(),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             u64::MAX  // エラー
@@ -36,6 +40,12 @@ fn sys_print_str(ptr: u64, len: u64) -> u64 {
 }
 
 /// fork
-fn sys_fork() {
-    
+fn sys_fork() -> u64 {
+    let ret = thread::uprocess::syscalls::fork();
+    if let Err(e) = ret {
+        println!("{}", e);
+        return 1;
+    }
+    println!("success");
+    return 0;
 }

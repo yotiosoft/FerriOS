@@ -101,3 +101,4 @@ unsafe extern "C" fn syscall_entry() {
 /// システムコール番号
 pub const SYS_PRINT_NUM: u64 = 0;
 pub const SYS_PRINT_STR: u64 = 1;
+pub const SYS_FORK: u64 = 2;

@@ -8,7 +8,7 @@ use crate::{memory, thread};
 use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
 
 mod uthread;
-mod syscalls;
+pub mod syscalls;
 
 /// ユーザコード
 pub const USER_CODE_START: u64 = 0x0000_1000_0000_0000;
@@ -63,12 +63,11 @@ pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocato
     let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
     // ユーザページテーブルを作成
-    let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
     let (mut user_mapper, page_table) = if let Some(parent_pagetable) = parent_pagetable {
-        memory::copy_uvm(frame_allocator, physical_memory_offset, parent_pagetable)
+        memory::copy_uvm(frame_allocator, parent_pagetable)
     }
     else {
-        memory::new_uvm(frame_allocator, physical_memory_offset)
+        memory::new_uvm(frame_allocator)
     }?;
 
     // コードページ用領域を用意

@@ -43,30 +43,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     println!("");
 
     print!("Initializing..");
-    println!("step 1: before init");
     ferrios::init();
-    println!("step 2: after init");
-    println!("step 3: before console init");
     console::init(&mut boot_info.framebuffer);
-    println!("step 4: after console init");
     scheduler::init(Box::new(scheduler::round_robin::RoundRobin));
     println!("done.");
     
     let console_mode = console::CONSOLE.lock().get();
     println!("console-mode: {:?}", console_mode);
 
-    println!("Checking Virtual Memory..");
+    println!("initializing memory..");
     let phys_mem_offset = VirtAddr::new(
         boot_info.physical_memory_offset.into_option().unwrap()
     );
-    let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe {
-        BootInfoFrameAllocator::init(&boot_info.memory_regions)
-    };
+    let mut mapper = unsafe { memory::init(phys_mem_offset, &boot_info.memory_regions) };
 
     // allocator 初期化
-    println!("Initializing heap memory..");
-    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    println!("initializing heap memory..");
+    {
+        let mut guard = memory::FRAME_ALLOCATOR.lock();
+        let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+        allocator::init_heap(&mut mapper, frame_allocator).expect("heap initialization failed");
+    }
 
     // allocates
     let x = Box::new(41);
@@ -97,7 +94,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ユーザプロセス作成
     const USER_CODE: &[u8] = &[
         // mov rax, 0        (syscall番号: SYS_PRINT_NUM)
-        0x48, 0xC7, 0xC0, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00,
         // mov rdi, 42       (引数1: 表示する数値)
         0x48, 0xC7, 0xC7, 0x7B, 0x00, 0x00, 0x00,
         // syscall
@@ -106,7 +103,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         0xEB, 0xEE,
     ];
 
-    thread::uprocess::create_user_process(USER_CODE, &mut frame_allocator, None).expect("failed to create user process");
+    {
+        let mut guard = memory::FRAME_ALLOCATOR.lock();
+        let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+        thread::uprocess::create_user_process(USER_CODE, frame_allocator, None).expect("failed to create user process");
+    }
 
     println!("Starting the scheduler..");
     scheduler::scheduler();

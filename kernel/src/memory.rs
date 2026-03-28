@@ -9,6 +9,7 @@ use crate::thread;
 lazy_static! {
     pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
     pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
+    pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
 const PAGETABLE_USER_SPACE_START: usize = 0;
@@ -26,14 +27,20 @@ fn pd_index  (va: VirtAddr) -> usize { (va.as_u64() as usize >> 21) & 0x1FF }
 fn pt_index  (va: VirtAddr) -> usize { (va.as_u64() as usize >> 12) & 0x1FF }
 
 /// 新しい OffsetPageTable を初期化する
-pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+pub unsafe fn init(physical_memory_offset: VirtAddr, memory_regions: &'static MemoryRegions) -> OffsetPageTable<'static> {
     // カーネルページテーブルアドレスを取得
     let (kernel_frame, _) = x86_64::registers::control::Cr3::read();
     *KERNEL_PAGE_TABLE_FRAME.lock() = Some(kernel_frame);
 
     // 物理メモリオフセットを取得
     *PHYSICAL_MEMORY_OFFSET.lock() = Some(physical_memory_offset);
+    
+    // FRAME_ALLOCATOR の初期化
+    *FRAME_ALLOCATOR.lock() = Some(unsafe {
+        BootInfoFrameAllocator::init(memory_regions)
+    });
 
+    // PML4 への可変参照を取得し、mapper を返す
     unsafe {
         let level_4_table = active_level_4_table(physical_memory_offset);
         OffsetPageTable::new(level_4_table, physical_memory_offset)
@@ -202,7 +209,10 @@ unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physica
     Ok((new_frame, new_table_ptr))
 }
 
-pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+    // physical_memory_offset
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+
     // 新しい level-4 フレームを allocate
     let (new_frame, new_table_ptr) = unsafe {
         setup_kvm(frame_allocator, physical_memory_offset)
@@ -226,9 +236,12 @@ pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_mem
 }
 
 /// 親プロセスのユーザ空間 [0]..[255] を子プロセスにコピー
-pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr, parent_pml4: &mut PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4: &mut PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+    // physical_memory_offset
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+
     // 子の PML4 を作成
-    let (child_offset_table, child_pml4_frame) = new_uvm(frame_allocator, physical_memory_offset)?;
+    let (child_offset_table, child_pml4_frame) = new_uvm(frame_allocator)?;
 
     // 子の PML4 への生ポインタを取得
     let child_pml4_virt = physical_memory_offset + child_pml4_frame.start_address().as_u64();
@@ -356,7 +369,7 @@ unsafe fn table_from_frame(frame: PhysFrame, physical_memory_offset: VirtAddr) -
 }
 
 /// 物理アドレス ->  仮想アドレス変換
-unsafe fn phys_to_virt(phys: PhysAddr, physical_memory_offset: VirtAddr) -> VirtAddr {
+pub unsafe fn phys_to_virt(phys: PhysAddr, physical_memory_offset: VirtAddr) -> VirtAddr {
     VirtAddr::new(physical_memory_offset.as_u64() + phys.as_u64())
 }
 
