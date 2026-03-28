@@ -84,3 +84,16 @@ extern "C" fn kthread_entry() -> ! {
     };
     entry();
 }
+
+/// スレッドを Thread Table に追加
+pub fn add_to_thread_table(thread: Thread) -> Result<(), &'static str> {
+    let tid = thread.tid;
+    if tid >= NTHREAD {
+        return Err("Thread table is full");
+    }
+
+    let mut thread_table = THREAD_TABLE.lock();
+    thread_table[tid] = thread;
+
+    Ok(())
+}

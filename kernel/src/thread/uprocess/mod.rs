@@ -2,11 +2,12 @@ use spin::Mutex;
 use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame } };
 use lazy_static::lazy_static;
 
-use crate::memory;
+use crate::{memory, thread};
 
 use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
 
 mod uthread;
+mod syscalls;
 
 /// ユーザコード
 pub const USER_CODE_START: u64 = 0x0000_1000_0000_0000;
@@ -56,7 +57,7 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
+pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
     // ユーザページのフラグ
     let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
@@ -96,43 +97,49 @@ pub fn create_user_process(code: &[u8], mapper: &mut impl Mapper<Size4KiB>, fram
         }
     }
 
-    // カーネルスタックを作成
-    let kstack = unsafe {
-        let layout = alloc::alloc::Layout::from_size_align(STACK_SIZE, 16).unwrap();
-        alloc::alloc::alloc(layout)
-    };
-    let kstack_top = kstack as u64 + STACK_SIZE as u64;
+    // プロセスを作成
+    let mut process = alloc_proc()?;
 
-    // init thread を作成
-    let thread = uthread::create_user_thread(kstack_top);
+    // ページテーブルを登録
+    process.page_table = Some(page_table);
 
-    // Thread Table に追加
-    let tid = thread.tid;
-    let mut thread_table = THREAD_TABLE.lock();
-    thread_table[tid] = thread;
+    // プロセスを Process Table に追加
+    add_to_process_table(process)?;
 
-    // Process ID を決定
-    let pid = next_pid()?;
-
-    // Thread 構造体に pid を設定
-    thread_table[tid].pid = Some(pid);
-
-    // Process 構造体を作成
-    let mut process = Process {
-        pid: pid,
-        threads: [None; 8],
-        nthread: 1,
-        page_table: Some(page_table),
-    };
-    process.add_thread(tid)?;
-
-    // Process Table に追加
-    let mut process_table = PROCESS_TABLE.lock();
-    process_table[pid] = Some(process);
+    // 全スレッドを Runnable としてマーク
+    mark_threads_as_runnable(process)?;
 
     Ok(())
 }
 
+/// 新規プロセス作成
+fn alloc_proc() -> Result<Process, &'static str> {
+    // Process ID を決定
+    let pid = next_pid()?;
+
+    // 1st thread を作成
+    let mut first_thread = uthread::create_user_thread()?;
+    first_thread.pid = Some(pid);
+
+    // プロセス構造体
+    let mut process = Process {
+        pid: pid,
+        threads: [None; 8],
+        nthread: 1,
+        page_table: None,
+    };
+
+    // 1st thread を追加
+    process.add_thread(first_thread.tid)?;
+
+    // Thread Table に追加
+    let mut thread_table = THREAD_TABLE.lock();
+    thread_table[first_thread.tid] = first_thread;
+
+    Ok(process)
+}
+
+/// PID 割り当て
 fn next_pid() -> Result<usize, &'static str> {
     let table = PROCESS_TABLE.lock();
     for i in 0..NPROCESS-1 {
@@ -141,4 +148,33 @@ fn next_pid() -> Result<usize, &'static str> {
         }
     }
     Err("Process table is full")
+}
+
+/// プロセスを Process Table に追加
+fn add_to_process_table(process: Process) -> Result<(), &'static str> {
+    let pid = process.pid;
+    if pid >= NPROCESS {
+        return Err("Process table is full");
+    }
+
+    let mut process_table = PROCESS_TABLE.lock();
+    process_table[process.pid] = Some(process);
+
+    Ok(())
+}
+
+/// プロセス内の全スレッドを Runnable としてマークする
+fn mark_threads_as_runnable(process: Process) -> Result<(), &'static str> {
+    let mut thread_table = THREAD_TABLE.lock();
+
+    for thread_element in process.threads {
+        if let Some(tid) = thread_element {
+            if tid > super::NTHREAD {
+                return Err("tid > NTHREAD");
+            }
+            thread_table[tid].state = ThreadState::Runnable;
+        }
+    }
+
+    Ok(())
 }

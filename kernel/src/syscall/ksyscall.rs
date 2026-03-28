@@ -34,3 +34,8 @@ fn sys_print_str(ptr: u64, len: u64) -> u64 {
         u64::MAX
     }
 }
+
+/// fork
+fn sys_fork() {
+    
+}

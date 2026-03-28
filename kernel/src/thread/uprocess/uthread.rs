@@ -1,14 +1,21 @@
 use super::{ THREAD_TABLE, USER_STACK_TOP, USER_CODE_START, ThreadState };
 use crate::{gdt, thread::Thread};
 
-pub fn create_user_thread(kstack_top: u64) -> Thread {
+pub fn create_user_thread() -> Result<Thread, &'static str> {
     // スレッド ID を確保
-    let tid = super::super::next_tid().expect("Thread table is full");
+    let tid = super::super::next_tid().ok_or("Thread table is full")?;
+
+    // カーネルスタックを作成
+    let kstack = unsafe {
+        let layout = alloc::alloc::Layout::from_size_align(super::STACK_SIZE, 16).unwrap();
+        alloc::alloc::alloc(layout)
+    };
+    let kstack_top = kstack as u64 + super::STACK_SIZE as u64;
 
     // スレッドテーブルに追加
     let mut thread = Thread::new();
     thread.tid = tid;
-    thread.state = ThreadState::Runnable;
+    thread.state = ThreadState::Embryo;
     thread.kstack = kstack_top;
 
     // コンテキストを初期化する
@@ -19,7 +26,7 @@ pub fn create_user_thread(kstack_top: u64) -> Thread {
     thread.context.ss = gdt::GDT.1.user_data_selector.0 as u64;
     thread.context.rsp3 = USER_STACK_TOP;
 
-    thread
+    Ok(thread)
 }
 
 unsafe extern "C" fn ring3_entry_trampoline() -> ! {

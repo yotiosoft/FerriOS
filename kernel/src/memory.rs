@@ -182,7 +182,7 @@ pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
     if let Some(pid) = thread.pid {
         let process_table = thread::uprocess::PROCESS_TABLE.lock();
         let process = &process_table[pid].expect("this process does not have page table yet");
-        let page_table = process.page_table.expect("this process is not in the process_table");
+        let page_table = process.page_table.expect("this process does not have a page-table");
 
         unsafe {
             x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
