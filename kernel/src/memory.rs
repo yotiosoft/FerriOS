@@ -18,11 +18,7 @@ const PAGETABLE_KERNEL_SPACE_END: usize = 512;
 
 pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 
-const PDX_SHIFT: usize = 21;
-const PTX_SHIFT: usize = 12;
-const PX_MASK: usize = 0x1ff;
-
-const PGSIZE_MASK: usize = 0xFFF;
+const PGSIZE: usize = 4096;
 
 fn pml4_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 39) & 0x1FF }
 fn pdpt_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 30) & 0x1FF }
@@ -42,11 +38,6 @@ pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static>
         let level_4_table = active_level_4_table(physical_memory_offset);
         OffsetPageTable::new(level_4_table, physical_memory_offset)
     }
-}
-
-/// 与えられた仮想アドレスを対応する物理アドレスに変換
-pub unsafe fn translate_addr(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Option<PhysAddr> {
-    translate_addr_inner(addr, physical_memory_offset)
 }
 
 /// 与えられたページをフレーム 0xb8000 に試しにマップする
@@ -124,14 +115,12 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
     ];
     let mut frame = level_4_table_frame;
 
-    // 角層のページテーブルをたどる
+    // pagetable walk
     for &index in &table_indexes {
-        // フレームをページテーブルの参照に変換
         let virt = physical_memory_offset + frame.start_address().as_u64();
         let table_ptr: *const PageTable = virt.as_ptr();
         let table = unsafe { &*table_ptr };
 
-        // ページテーブルを読み込み、frame を更新
         let entry = &table[index];
         frame = match entry.frame() {
             Ok(frame) => frame,
@@ -140,7 +129,7 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
         };
     }
 
-    // 目的の物理アドレスを計算
+    // 物理アドレスを計算
     Some(frame.start_address() + u64::from(addr.page_offset()))
 }
 
@@ -213,8 +202,6 @@ unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physica
     Ok((new_frame, new_table_ptr))
 }
 
-/// ユーザ用ページテーブルを作成する
-/// カーネル領域は現在（カーネル）のページテーブルからコピーする
 pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
     // 新しい level-4 フレームを allocate
     let (new_frame, new_table_ptr) = unsafe {
@@ -238,33 +225,149 @@ pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_mem
     Ok((new_page_table, new_frame))
 }
 
-/// 親プロセスのユーザ空間を子プロセスにコピー
-pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr, current_table: &PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
-    // ユーザ空間を作成、カーネル空間のコピー
-    let (new_page_table, new_frame) = new_uvm(frame_allocator, physical_memory_offset)?;
-    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
-    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
-    let new_table = unsafe {
-        &mut *new_table_ptr
-    };
+/// 親プロセスのユーザ空間 [0]..[255] を子プロセスにコピー
+pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr, parent_pml4: &mut PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+    // 子の PML4 を作成
+    let (child_offset_table, child_pml4_frame) = new_uvm(frame_allocator, physical_memory_offset)?;
 
-    // ユーザ空間をコピー
-    for i in PAGETABLE_USER_SPACE_START..PAGETABLE_USER_SPACE_END {
-        new_table[i] = current_table[i].clone();
+    // 子の PML4 への生ポインタを取得
+    let child_pml4_virt = physical_memory_offset + child_pml4_frame.start_address().as_u64();
+    let child_pml4: &mut PageTable = unsafe { &mut *child_pml4_virt.as_mut_ptr() };
+
+    // ユーザ空間 PML4 エントリ (index 0..255) を走査
+    for pml4_idx in PAGETABLE_USER_SPACE_START..PAGETABLE_USER_SPACE_END {
+        if !parent_pml4[pml4_idx].flags().contains(PageTableFlags::PRESENT) {
+            continue;
+        }
+
+        // 子の PDPT を新規割り当て
+        let child_pdpt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PDPT frame")?;
+        init_page_table(child_pdpt_frame, physical_memory_offset);
+
+        // 子の PML4 エントリに書き込む
+        let parent_pdpt_flags = parent_pml4[pml4_idx].flags();
+        child_pml4[pml4_idx].set_frame(child_pdpt_frame, parent_pdpt_flags);
+
+        // 親の PDPT を取得
+        let parent_pdpt = unsafe {
+            table_from_entry(&parent_pml4[pml4_idx], physical_memory_offset)
+        };
+        let child_pdpt = unsafe {
+            table_from_frame(child_pdpt_frame, physical_memory_offset)
+        };
+
+        // PDPT エントリを走査
+        for pdpt_idx in 0..512usize {
+            if !parent_pdpt[pdpt_idx].flags().contains(PageTableFlags::PRESENT) {
+                continue;
+            }
+
+            // 子の PD を新規割り当て
+            let child_pd_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PD frame")?;
+            init_page_table(child_pd_frame, physical_memory_offset);
+
+            let parent_pd_flags = parent_pdpt[pdpt_idx].flags();
+            child_pdpt[pdpt_idx].set_frame(child_pd_frame, parent_pd_flags);
+
+            let parent_pd = unsafe {
+                table_from_entry(&parent_pdpt[pdpt_idx], physical_memory_offset)
+            };
+            let child_pd = unsafe {
+                table_from_frame(child_pd_frame, physical_memory_offset)
+            };
+
+            // PD エントリを走査
+            for pd_idx in 0..512usize {
+                if !parent_pd[pd_idx].flags().contains(PageTableFlags::PRESENT) {
+                    continue;
+                }
+
+                // 子の PT を新規割り当て
+                let child_pt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PT frame")?;
+                init_page_table(child_pt_frame, physical_memory_offset);
+
+                let parent_pt_flags = parent_pd[pd_idx].flags();
+                child_pd[pd_idx].set_frame(child_pt_frame, parent_pt_flags);
+
+                let parent_pt = unsafe {
+                    table_from_entry(&parent_pd[pd_idx], physical_memory_offset)
+                };
+                let child_pt = unsafe {
+                    table_from_frame(child_pt_frame, physical_memory_offset)
+                };
+
+                // PT エントリを走査
+                for pt_idx in 0..512usize {
+                    let parent_pte = &parent_pt[pt_idx];
+                    if !parent_pte.flags().contains(PageTableFlags::PRESENT) {
+                        continue;
+                    }
+
+                    // 新しい物理フレームを確保
+                    let new_frame = frame_allocator
+                        .allocate_frame()
+                        .ok_or("copy_uvm: failed to allocate data frame")?;
+
+                    let src_virt = physical_memory_offset + parent_pte.addr().as_u64();
+                    let dst_virt = physical_memory_offset + new_frame.start_address().as_u64();
+
+                    // ページをコピー
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            src_virt.as_ptr::<u8>(),
+                            dst_virt.as_mut_ptr::<u8>(),
+                            4096,
+                        );
+                    }
+
+                    // 子の PT エントリに新フレームを書き込む
+                    child_pt[pt_idx].set_frame(new_frame, parent_pte.flags());
+                }
+            }
+        }
     }
 
-    Ok((new_page_table, new_frame))
+    Ok((child_offset_table, child_pml4_frame))
 }
 
-/// 物理アドレス → 仮想アドレス変換
-/// physical_memory_offset を使う
+/// フレームをゼロクリアしてページテーブルとして初期化する
+fn init_page_table(frame: PhysFrame, physical_memory_offset: VirtAddr) {
+    let virt = physical_memory_offset + frame.start_address().as_u64();
+    unsafe {
+        virt.as_mut_ptr::<PageTable>().write(PageTable::new());
+    }
+}
+
+/// PageTableEntry が指すテーブルへの参照を返す
+unsafe fn table_from_entry(entry: &PageTableEntry, physical_memory_offset: VirtAddr) -> &'static mut PageTable {
+    if !entry.flags().contains(PageTableFlags::PRESENT) {
+        panic!("table_from_entry: pte does not present");
+    }
+
+    let phys = entry.addr();
+    let virt = physical_memory_offset + phys.as_u64();
+    unsafe { &mut *virt.as_mut_ptr() }
+}
+
+/// PhysFrame から PageTable への参照を返す
+unsafe fn table_from_frame(frame: PhysFrame, physical_memory_offset: VirtAddr) -> &'static mut PageTable {
+    let virt = physical_memory_offset + frame.start_address().as_u64();
+    unsafe { &mut *virt.as_mut_ptr() }
+}
+
+/// 物理アドレス ->  仮想アドレス変換
 unsafe fn phys_to_virt(phys: PhysAddr, physical_memory_offset: VirtAddr) -> VirtAddr {
     VirtAddr::new(physical_memory_offset.as_u64() + phys.as_u64())
 }
 
+/// 仮想アドレス -> 物理アドレスに変換
+unsafe fn virt_to_phys(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Option<PhysAddr> {
+    translate_addr_inner(addr, physical_memory_offset)
+}
+
 /// PageTableEntry の物理アドレスを取得
 /// フラグビットを除く
-fn entry_phys_addr(entry: &PageTableEntry) -> PhysAddr {
+fn pte_phys_addr(entry: &PageTableEntry) -> PhysAddr {
     PhysAddr::new(entry.addr().as_u64())
 }
 
@@ -294,7 +397,7 @@ where
             }
             entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
         }
-        let phys = entry_phys_addr(entry);
+        let phys = pte_phys_addr(entry);
         unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
     };
 
@@ -312,7 +415,7 @@ where
             }
             entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
         }
-        let phys = entry_phys_addr(entry);
+        let phys = pte_phys_addr(entry);
         unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
     };
 
@@ -330,7 +433,7 @@ where
             }
             entry.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
         }
-        let phys = entry_phys_addr(entry);
+        let phys = pte_phys_addr(entry);
         unsafe { &mut *(phys_to_virt(phys, physical_memory_offset).as_mut_ptr::<PageTable>()) }
     };
 

@@ -58,7 +58,7 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pagetable: Option<&PageTable>) -> Result<(), &'static str> {
+pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pagetable: Option<&mut PageTable>) -> Result<(), &'static str> {
     // ユーザページのフラグ
     let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
