@@ -1,6 +1,6 @@
 use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
-use x86_64::structures::paging::{ PageTable, OffsetPageTable, Page, PhysFrame, Mapper, Size4KiB, FrameAllocator };
+use x86_64::structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB };
 use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
 use spin::Mutex;
 use lazy_static::lazy_static;
@@ -15,6 +15,42 @@ const PAGETABLE_USER_SPACE_START: usize = 0;
 const PAGETABLE_USER_SPACE_END: usize = 255;
 const PAGETABLE_KERNEL_SPACE_START: usize = 256;
 const PAGETABLE_KERNEL_SPACE_END: usize = 512;
+
+pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
+
+const PDX_SHIFT: usize = 21;
+const PTX_SHIFT: usize = 12;
+const PX_MASK: usize = 0x1ff;
+
+const PGSIZE_MASK: usize = 0xFFF;
+
+#[macro_export]
+macro_rules! pdx {
+    ($va:expr) => {
+        (($va.as_u64() as usize) >> PDX_SHIFT) & PX_MASK
+    };
+}
+
+#[macro_export]
+macro_rules! ptx {
+    ($va:expr) => {
+        (($va.as_u64() as usize) >> PTX_SHIFT) & PX_MASK
+    };
+}
+
+#[macro_export]
+macro_rules! p2v {
+    ($a:expr) => {
+        (($a as usize).wrapping_add(PHYSICAL_KERNEL_BASE as usize)) as *mut u8
+    };
+}
+
+#[macro_export]
+macro_rules! pte_addr {
+    ($pte:expr) => {
+        ($pte.as_u64() as usize) & !PGSIZE_MASK
+    };
+}
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
@@ -36,10 +72,8 @@ pub unsafe fn translate_addr(addr: VirtAddr, physical_memory_offset: VirtAddr) -
 
 /// 与えられたページをフレーム 0xb8000 に試しにマップする
 pub fn create_example_mapping(page: Page, mapper: &mut OffsetPageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>) {
-    use x86_64::structures::paging::PageTableFlags as Flags;
-
     let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
-    let flags = Flags::PRESENT | Flags::WRITABLE;
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
 
     let map_to_result = unsafe {
         mapper.map_to(page, frame, flags, frame_allocator)
@@ -236,9 +270,21 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_me
     };
 
     // ユーザ空間をコピー
-    for i in PAGETABLE_KERNEL_SPACE_START..PAGETABLE_KERNEL_SPACE_END {
+    for i in PAGETABLE_USER_SPACE_START..PAGETABLE_USER_SPACE_END {
         new_table[i] = current_table[i].clone();
     }
 
     Ok((new_page_table, new_frame))
+}
+
+/// PageTable を walk して仮想アドレスに対応する PTE を取得する
+/// alloc == true の場合、なければ allocate する
+fn walk_pagetable(pagetable: &PageTable, virtual_address: &VirtAddr) -> Option<PageTable> {
+    let pagetable_entry = &pagetable[pdx!(virtual_address)];
+
+    //if pagetable_entry.flags().contains(PageTableFlags::PRESENT) {
+    //    let target_pagetable = p2v!(pte_addr!(pagetable_entry.addr()));
+    //}
+
+    None
 }
