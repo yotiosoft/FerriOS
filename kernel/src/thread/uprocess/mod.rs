@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 use spin::Mutex;
-use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame } };
+use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
 use lazy_static::lazy_static;
 
 use crate::{memory, thread};
@@ -58,14 +58,17 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
+pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pagetable: Option<&PageTable>) -> Result<(), &'static str> {
     // ユーザページのフラグ
     let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
     // ユーザページテーブルを作成
     let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
-    let (mut user_mapper, page_table) = unsafe {
-        memory::create_user_page_table(frame_allocator, physical_memory_offset)
+    let (mut user_mapper, page_table) = if let Some(parent_pagetable) = parent_pagetable {
+        memory::copy_uvm(frame_allocator, physical_memory_offset, parent_pagetable)
+    }
+    else {
+        memory::new_uvm(frame_allocator, physical_memory_offset)
     }?;
 
     // コードページ用領域を用意

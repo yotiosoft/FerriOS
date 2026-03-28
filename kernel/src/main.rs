@@ -106,7 +106,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         0xEB, 0xEE,
     ];
 
-    thread::uprocess::create_user_process(USER_CODE, &mut frame_allocator).expect("failed to create user process");
+    thread::uprocess::create_user_process(USER_CODE, &mut frame_allocator, None).expect("failed to create user process");
 
     println!("Starting the scheduler..");
     scheduler::scheduler();

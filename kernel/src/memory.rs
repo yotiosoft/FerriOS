@@ -11,8 +11,10 @@ lazy_static! {
     pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
 }
 
+const PAGETABLE_USER_SPACE_START: usize = 0;
+const PAGETABLE_USER_SPACE_END: usize = 255;
 const PAGETABLE_KERNEL_SPACE_START: usize = 256;
-const PAGETABLE_KERNEL_SPACE_END: usize = 521;
+const PAGETABLE_KERNEL_SPACE_END: usize = 512;
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
@@ -129,29 +131,6 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
     Some(frame.start_address() + u64::from(addr.page_offset()))
 }
 
-/// ユーザ用ページテーブルを作成する
-/// カーネル領域は現在（カーネル）のページテーブルからコピーする
-pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
-    // 新しい level-4 フレームを allocate
-    let (new_frame, new_table_ptr) = setup_kvm(frame_allocator, physical_memory_offset)?;
-
-    let new_table = unsafe {
-        &mut *new_table_ptr
-    };
-
-    // ユーザ空間のエントリのみクリア
-    let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
-    let user_stack_l4_index = (crate::thread::uprocess::USER_STACK_TOP >> 39) as usize & 0x1FF;   // 64
-    new_table[user_code_l4_index].set_unused();
-    new_table[user_stack_l4_index].set_unused();
-
-    let new_page_table = unsafe {
-        OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
-    };
-
-    Ok((new_page_table, new_frame))
-}
-
 /// カーネルページテーブルに切り替え
 pub unsafe fn switch_to_kernel_page_table() {
     let kernel_frame = KERNEL_PAGE_TABLE_FRAME.lock();
@@ -191,13 +170,8 @@ pub fn setup_kstack(thread: &mut thread::Thread) {
     thread.context.rsp = kstack_top;
 }
 
-/// 親プロセスのユーザ空間を子プロセスにコピー
-pub fn copy_uvm(pagetable: &PhysFrame, size: usize) {
-
-}
-
 /// カーネル空間を map する
-pub unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(PhysFrame, *mut PageTable), &'static str> {
+unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(PhysFrame, *mut PageTable), &'static str> {
     // 新しい level-4 フレームを allocate
     let new_frame = frame_allocator.allocate_frame().ok_or("allocating frame failed")?;
 
@@ -224,4 +198,47 @@ pub unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, phy
     }
 
     Ok((new_frame, new_table_ptr))
+}
+
+/// ユーザ用ページテーブルを作成する
+/// カーネル領域は現在（カーネル）のページテーブルからコピーする
+pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+    // 新しい level-4 フレームを allocate
+    let (new_frame, new_table_ptr) = unsafe {
+        setup_kvm(frame_allocator, physical_memory_offset)
+    }?;
+
+    let new_table = unsafe {
+        &mut *new_table_ptr
+    };
+
+    // ユーザ空間のエントリのみクリア
+    let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
+    let user_stack_l4_index = (crate::thread::uprocess::USER_STACK_TOP >> 39) as usize & 0x1FF;   // 64
+    new_table[user_code_l4_index].set_unused();
+    new_table[user_stack_l4_index].set_unused();
+
+    let new_page_table = unsafe {
+        OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
+    };
+
+    Ok((new_page_table, new_frame))
+}
+
+/// 親プロセスのユーザ空間を子プロセスにコピー
+pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr, current_table: &PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
+    // ユーザ空間を作成、カーネル空間のコピー
+    let (new_page_table, new_frame) = new_uvm(frame_allocator, physical_memory_offset)?;
+    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
+    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
+    let new_table = unsafe {
+        &mut *new_table_ptr
+    };
+
+    // ユーザ空間をコピー
+    for i in PAGETABLE_KERNEL_SPACE_START..PAGETABLE_KERNEL_SPACE_END {
+        new_table[i] = current_table[i].clone();
+    }
+
+    Ok((new_page_table, new_frame))
 }
