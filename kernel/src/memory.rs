@@ -11,6 +11,9 @@ lazy_static! {
     pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
 }
 
+const PAGETABLE_KERNEL_SPACE_START: usize = 256;
+const PAGETABLE_KERNEL_SPACE_END: usize = 521;
+
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
     // カーネルページテーブルアドレスを取得
@@ -128,31 +131,13 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
 
 /// ユーザ用ページテーブルを作成する
 /// カーネル領域は現在（カーネル）のページテーブルからコピーする
-pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Option<(OffsetPageTable<'static>, PhysFrame)> {
+pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
     // 新しい level-4 フレームを allocate
-    let new_frame = frame_allocator.allocate_frame()?;
+    let (new_frame, new_table_ptr) = setup_kvm(frame_allocator, physical_memory_offset)?;
 
-    // 新しいページテーブルを初期化
-    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
-    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
-    unsafe {
-        new_table_ptr.write(PageTable::new());
-    }
-
-    // カーネル用領域 をコピー
-    let (current_frame, _) = x86_64::registers::control::Cr3::read();
-    let current_va = physical_memory_offset + current_frame.start_address().as_u64();
-    let current_table_ptr: *const PageTable = current_va.as_ptr();
-    let current_table = unsafe {
-        &*current_table_ptr
-    };
     let new_table = unsafe {
         &mut *new_table_ptr
     };
-
-    for i in 256..512 {
-        new_table[i] = current_table[i].clone();
-    }
 
     // ユーザ空間のエントリのみクリア
     let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
@@ -164,7 +149,7 @@ pub unsafe fn create_user_page_table(frame_allocator: &mut impl FrameAllocator<S
         OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
     };
 
-    Some((new_page_table, new_frame))
+    Ok((new_page_table, new_frame))
 }
 
 /// カーネルページテーブルに切り替え
@@ -191,4 +176,52 @@ pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
     else {
         panic!("this process does not have pid");
     }
+}
+
+/// カーネルスタックを用意する
+pub fn setup_kstack(thread: &mut thread::Thread) {
+    // カーネルスタックを作成
+    let kstack = unsafe {
+        let layout = alloc::alloc::Layout::from_size_align(thread::STACK_SIZE, 16).unwrap();
+        alloc::alloc::alloc(layout)
+    };
+    let kstack_top = kstack as u64 + thread::STACK_SIZE as u64;
+
+    thread.kstack = kstack_top;
+    thread.context.rsp = kstack_top;
+}
+
+/// 親プロセスのユーザ空間を子プロセスにコピー
+pub fn copy_uvm(pagetable: &PhysFrame, size: usize) {
+
+}
+
+/// カーネル空間を map する
+pub unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(PhysFrame, *mut PageTable), &'static str> {
+    // 新しい level-4 フレームを allocate
+    let new_frame = frame_allocator.allocate_frame().ok_or("allocating frame failed")?;
+
+    // 新しいページテーブルを初期化
+    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
+    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
+    unsafe {
+        new_table_ptr.write(PageTable::new());
+    }
+
+    // カーネル用領域 をコピー
+    let (current_frame, _) = x86_64::registers::control::Cr3::read();
+    let current_va = physical_memory_offset + current_frame.start_address().as_u64();
+    let current_table_ptr: *const PageTable = current_va.as_ptr();
+    let current_table = unsafe {
+        &*current_table_ptr
+    };
+    let new_table = unsafe {
+        &mut *new_table_ptr
+    };
+
+    for i in PAGETABLE_KERNEL_SPACE_START..PAGETABLE_KERNEL_SPACE_END {
+        new_table[i] = current_table[i].clone();
+    }
+
+    Ok((new_frame, new_table_ptr))
 }

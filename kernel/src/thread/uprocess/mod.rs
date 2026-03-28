@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use spin::Mutex;
 use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame } };
 use lazy_static::lazy_static;
@@ -65,7 +66,7 @@ pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocato
     let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
     let (mut user_mapper, page_table) = unsafe {
         memory::create_user_page_table(frame_allocator, physical_memory_offset)
-    }.ok_or("failed to allocate page table frame")?;
+    }?;
 
     // コードページ用領域を用意
     let code_page = Page::containing_address(VirtAddr::new(USER_CODE_START));

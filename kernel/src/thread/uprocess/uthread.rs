@@ -1,3 +1,5 @@
+use crate::memory;
+
 use super::{ THREAD_TABLE, USER_STACK_TOP, USER_CODE_START, ThreadState };
 use crate::{gdt, thread::Thread};
 
@@ -5,21 +7,15 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
     // スレッド ID を確保
     let tid = super::super::next_tid().ok_or("Thread table is full")?;
 
-    // カーネルスタックを作成
-    let kstack = unsafe {
-        let layout = alloc::alloc::Layout::from_size_align(super::STACK_SIZE, 16).unwrap();
-        alloc::alloc::alloc(layout)
-    };
-    let kstack_top = kstack as u64 + super::STACK_SIZE as u64;
-
     // スレッドテーブルに追加
     let mut thread = Thread::new();
     thread.tid = tid;
     thread.state = ThreadState::Embryo;
-    thread.kstack = kstack_top;
+
+    // カーネルスタックを作成
+    memory::setup_kstack(&mut thread);
 
     // コンテキストを初期化する
-    thread.context.rsp = kstack_top;
     thread.context.rip = ring3_entry_trampoline as u64;
     thread.context.rflags = 0x200;  // IF (Interrupt Flag) を有効化
     thread.context.cs = gdt::GDT.1.user_code_selector.0 as u64;
