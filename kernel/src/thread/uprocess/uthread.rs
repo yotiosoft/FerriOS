@@ -1,7 +1,7 @@
 use crate::memory;
 
 use super::{ THREAD_TABLE, USER_STACK_TOP, USER_CODE_START, ThreadState };
-use crate::{gdt, thread::Thread};
+use crate::{gdt, thread::Thread, cpu};
 
 pub fn create_user_thread() -> Result<Thread, &'static str> {
     // スレッド ID を確保
@@ -16,7 +16,7 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
     memory::setup_kstack(&mut thread);
 
     // コンテキストを初期化する
-    thread.context.rip = ring3_entry_trampoline as u64;
+    thread.context.rip = init_process_ring3_entry_trampoline as u64;
     thread.context.rflags = 0x200;  // IF (Interrupt Flag) を有効化
     thread.context.cs = gdt::GDT.1.user_code_selector.0 as u64;
     thread.context.ss = gdt::GDT.1.user_data_selector.0 as u64;
@@ -25,7 +25,8 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
     Ok(thread)
 }
 
-unsafe extern "C" fn ring3_entry_trampoline() -> ! {
+/// init process 用の trampoline
+unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
     let (cs, ss, rsp3, rip) = {
         let table = THREAD_TABLE.lock();
         let ctx =&table[super::super::current_tid().expect("No running thread")].context;

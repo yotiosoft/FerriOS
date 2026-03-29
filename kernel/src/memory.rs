@@ -175,8 +175,15 @@ pub fn setup_kstack(thread: &mut thread::Thread) {
     };
     let kstack_top = kstack as u64 + thread::STACK_SIZE as u64;
 
+    // カーネルスタックの先頭に TrapFrame を確保
+    let tf_ptr = (kstack_top - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64) as *mut thread::trapframe::TrapFrame;
+    unsafe {
+        tf_ptr.write(thread::trapframe::TrapFrame::new());
+    }
+
     thread.kstack = kstack_top;
     thread.context.rsp = kstack_top;
+    thread.tf = Some(tf_ptr);
 }
 
 /// カーネル空間を map する

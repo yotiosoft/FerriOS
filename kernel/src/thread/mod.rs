@@ -4,6 +4,7 @@ use crate::cpu;
 
 pub mod kthread;
 pub mod uprocess;
+pub mod trapframe;
 
 extern crate alloc;
 
@@ -22,12 +23,13 @@ pub enum ThreadState {
 /// Process Control Block
 #[derive(Debug, Clone, Copy)]
 pub struct Thread {
-    pub tid: usize,             // Thread ID
-    pub pid: Option<usize>,     // Process ID (ユーザプロセスの場合)
-    pub state: ThreadState,     // スレッドの状態
-    pub context: Context,       // スレッドのコンテキスト
-    pub kstack: u64,            // このスレッド用のカーネルスタック
-    pub entry: Option<fn() -> !>,       // 実行する関数
+    pub tid: usize,                             // Thread ID
+    pub pid: Option<usize>,                     // Process ID (ユーザプロセスの場合)
+    pub state: ThreadState,                     // スレッドの状態
+    pub context: Context,                       // スレッドのコンテキスト
+    pub kstack: u64,                            // このスレッド用のカーネルスタック
+    pub tf: Option<*mut trapframe::TrapFrame>,  // カーネルスタック上の trapframe のポインタ
+    pub entry: Option<fn() -> !>,               // 実行する関数
 }
 
 impl Thread {
@@ -38,10 +40,13 @@ impl Thread {
             state: ThreadState::Unused,
             context: Context::new(),
             kstack: 0,
+            tf: None,
             entry: None,
         }
     }
 }
+
+unsafe impl Send for Thread {}
 
 pub const NTHREAD: usize = 64;
 use spin::Mutex;

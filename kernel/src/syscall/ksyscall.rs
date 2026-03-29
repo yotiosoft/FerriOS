@@ -4,7 +4,15 @@ use crate::thread;
 /// Rustから呼ばれるディスパッチャ
 /// 戻り値はRAXに入る
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+pub extern "C" fn syscall_dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64, tf: *mut thread::trapframe::TrapFrame) -> u64 {
+    {
+        let cpu = crate::cpu::CPU.lock();
+        let tid = cpu.current_tid.expect("no current thread");
+        drop(cpu);
+        let mut table = crate::thread::THREAD_TABLE.lock();
+        table[tid].tf = Some(tf);
+    }
+
     match syscall_num {
         super::SYS_PRINT_NUM => sys_print_num(arg1),
         super::SYS_PRINT_STR => sys_print_str(arg1, arg2),
@@ -14,6 +22,18 @@ pub extern "C" fn syscall_dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3:
             u64::MAX  // エラー
         }
     }
+}
+
+/// TrapFrame をセットする
+#[unsafe(no_mangle)]
+pub extern "C" fn set_trapframe(tf_ptr: *mut thread::trapframe::TrapFrame) {
+    let tid = {
+        let cpu = crate::cpu::CPU.lock();
+        cpu.current_tid
+    }.expect("no current thread");
+    
+    let mut table = crate::thread::THREAD_TABLE.lock();
+    table[tid].tf = Some(tf_ptr);
 }
 
 /// 数値を表示する

@@ -128,7 +128,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
     let mut process = Process {
         pid: pid,
         threads: [None; 8],
-        nthread: 1,
+        nthread: 0,
         page_table: None,
     };
 

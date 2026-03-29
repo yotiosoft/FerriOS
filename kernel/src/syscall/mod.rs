@@ -62,6 +62,7 @@ unsafe extern "C" fn syscall_entry() {
 
         // syscall_dispatch(number=rax, arg0=rdi, arg1=rsi, arg2=rdx)
         // 引数は rdi, rsi, rdx に入っている
+        "mov r8,  rsp",
         "mov rcx, rdx",
         "mov rdx, rsi",
         "mov rsi, rdi",
