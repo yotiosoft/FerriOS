@@ -92,6 +92,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     println!("done.");
 
     // ユーザプロセス作成
+    const USER_CODE_FORK_LOOP: &[u8] = &[
+        // mov rax, 2          (SYS_FORK)
+        0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00,
+        // syscall
+        0x0F, 0x05,
+        // jmp -11             (先頭に戻って無限ループ)
+        0xEB, 0xF5,
+    ];
     const USER_CODE: &[u8] = &[
         // mov rax, 0        (syscall番号: SYS_PRINT_NUM)
         0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00,

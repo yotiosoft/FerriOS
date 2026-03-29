@@ -154,7 +154,7 @@ pub unsafe fn switch_to_kernel_page_table() {
 pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
     if let Some(pid) = thread.pid {
         let process_table = thread::uprocess::PROCESS_TABLE.lock();
-        let process = &process_table[pid].expect("this process does not have page table yet");
+        let process = &process_table[pid].expect("process_table does not have the process");
         let page_table = process.page_table.expect("this process does not have a page-table");
 
         unsafe {

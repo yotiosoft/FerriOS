@@ -1,4 +1,5 @@
 use crate::scheduler::context;
+use crate::thread;
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -22,6 +23,36 @@ impl Cpu {
             saved_user_rsp: 0,
             kernel_syscall_rsp: 0,
         }
+    }
+
+    pub fn current_tid(&self) -> Option<usize> {
+        self.current_tid
+    }
+
+    pub fn current_thread(&self) -> Option<thread::Thread> {
+        let tid = self.current_tid();
+        if let Some(tid) = tid {
+            let thread_table = thread::THREAD_TABLE.lock();
+            return Some(thread_table[tid]);
+        }
+        None
+    }
+
+    pub fn current_pid(&self) -> Option<usize> {
+        let thread = self.current_thread();
+        if let Some(thread) = thread {
+            return thread.pid;
+        }
+        None
+    }
+
+    pub fn current_process(&self) -> Option<thread::uprocess::Process> {
+        let pid = self.current_pid();
+        if let Some(pid) = pid {
+            let process_table = thread::uprocess::PROCESS_TABLE.lock();
+            return process_table[pid];
+        }
+        None
     }
 }
 

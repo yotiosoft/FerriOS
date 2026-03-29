@@ -14,11 +14,7 @@ pub fn fork() -> Result<(), &'static str> {
     // 現在のプロセスの PML4 page table を取得
     let mut current_process_pml4: &mut PageTable = {
         let cpu = cpu::CPU.lock();
-        let current_tid = cpu.current_tid.expect("no current thread");
-        let thread_table = thread::THREAD_TABLE.lock();
-        let current_pid = thread_table[current_tid].pid.expect("no pid");
-        let process_table = thread::uprocess::PROCESS_TABLE.lock();
-        let phys_frame = process_table[current_pid].expect("process not found").page_table.expect("no page table");
+        let phys_frame = cpu.current_process().expect("process not found").page_table.expect("no page table");
 
         let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
 
@@ -36,6 +32,10 @@ pub fn fork() -> Result<(), &'static str> {
     process.page_table = Some(page_table);
 
     // ステータスの設定
+
+    // process_table に追加
+    let mut process_table = super::PROCESS_TABLE.lock();
+    process_table[process.pid] = Some(process);
     
     // runnable に設定
     super::mark_threads_as_runnable(process)?;
