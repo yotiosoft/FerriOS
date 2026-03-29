@@ -354,7 +354,7 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
 fn init_page_table(frame: PhysFrame, physical_memory_offset: VirtAddr) {
     let virt = physical_memory_offset + frame.start_address().as_u64();
     unsafe {
-        virt.as_mut_ptr::<PageTable>().write(PageTable::new());
+        core::ptr::write_bytes(virt.as_mut_ptr::<u8>(), 0, 4096);
     }
 }
 
