@@ -50,13 +50,13 @@ impl super::Scheduler for RoundRobin {
                         if table[next_tid].pid.is_some() {
                             // ユーザスレッドの場合：プロセスのユーザページテーブルに切り替え
                             unsafe {
-                                memory::switch_to_user_page_table(&table[next_tid]);
+                                memory::umem::switch_to_user_page_table(&table[next_tid]);
                             }
                         }
                         else {
                             // カーネルスレッドの場合：カーネルページテーブルに切り替え
                             unsafe {
-                                memory::switch_to_kernel_page_table();
+                                memory::kmem::switch_to_kernel_page_table();
                             }
                         }
                         
@@ -87,7 +87,7 @@ impl super::Scheduler for RoundRobin {
 
         // カーネルページテーブルに切り替え
         unsafe {
-            memory::switch_to_kernel_page_table();
+            memory::kmem::switch_to_kernel_page_table();
         }
 
         let mut table = THREAD_TABLE.lock();

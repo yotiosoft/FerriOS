@@ -13,7 +13,7 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
     thread.state = ThreadState::Embryo;
 
     // カーネルスタックを作成
-    memory::setup_kstack(&mut thread);
+    memory::kmem::setup_kstack(&mut thread);
 
     // コンテキストを初期化する
     thread.context.rip = init_process_ring3_entry_trampoline as u64;

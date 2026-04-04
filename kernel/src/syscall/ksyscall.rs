@@ -1,5 +1,6 @@
 use crate::println;
 use crate::thread;
+use crate::exec;
 
 /// Rustから呼ばれるディスパッチャ
 /// 戻り値はRAXに入る
@@ -68,4 +69,9 @@ fn sys_fork() -> u64 {
     }
     println!("success");
     return 0;
+}
+
+/// exec
+fn sys_exec(code_ptr: u64, code_len: u64) -> u64 {
+    
 }

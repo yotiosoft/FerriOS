@@ -26,7 +26,7 @@ pub fn fork() -> Result<usize, &'static str> {
     };
 
     // proces state (page table) をコピー
-    let (_, page_table) = memory::copy_uvm(frame_allocator, &mut current_process_pml4)?;
+    let (_, page_table) = memory::umem::copy_uvm(frame_allocator, &mut current_process_pml4)?;
 
     // ページテーブル設定
     process.page_table = Some(page_table);

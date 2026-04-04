@@ -13,7 +13,7 @@ pub fn create_kernel_thread(entry: fn() -> !) {
     table[tid].state = ThreadState::Runnable;
 
     // カーネルスタックを用意する
-    memory::setup_kstack(&mut table[tid]);
+    memory::kmem::setup_kstack(&mut table[tid]);
 
     // コンテキストを初期化する
     table[tid].context.rip = super::kthread_entry as u64;

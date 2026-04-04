@@ -17,7 +17,7 @@ pub mod cpu;
 pub mod console;
 pub mod scheduler;
 pub mod syscall;
-
+pub mod exec;
 mod libbackend;
 pub use libbackend::exit::*;
 pub use libbackend::test::*;

@@ -13,6 +13,8 @@ pub struct TrapFrame {
     pub rax: u64,
     pub r11: u64,
     pub rcx: u64,
+    pub rip: u64,
+    pub rsp: u64,
 }
 
 impl TrapFrame {
@@ -30,6 +32,8 @@ impl TrapFrame {
             rax: 0,
             r11: 0,
             rcx: 0,
+            rip: 0,
+            rsp: 0,
         }
     }
 }

@@ -6,6 +6,9 @@ use spin::Mutex;
 use lazy_static::lazy_static;
 use crate::thread;
 
+pub mod kmem;
+pub mod umem;
+
 lazy_static! {
     pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
     pub static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
@@ -13,7 +16,7 @@ lazy_static! {
 }
 
 const PAGETABLE_USER_SPACE_START: usize = 0;
-const PAGETABLE_USER_SPACE_END: usize = 255;
+const PAGETABLE_USER_SPACE_END: usize = 256; // PML4 entries 0-255 are for user space
 const PAGETABLE_KERNEL_SPACE_START: usize = 256;
 const PAGETABLE_KERNEL_SPACE_END: usize = 512;
 
@@ -138,216 +141,6 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
 
     // 物理アドレスを計算
     Some(frame.start_address() + u64::from(addr.page_offset()))
-}
-
-/// カーネルページテーブルに切り替え
-pub unsafe fn switch_to_kernel_page_table() {
-    let kernel_frame = KERNEL_PAGE_TABLE_FRAME.lock();
-    if let Some(frame) = *kernel_frame {
-        unsafe {
-            x86_64::registers::control::Cr3::write(frame, Cr3Flags::empty());
-        }
-    }
-}
-
-/// ユーザプロセスのページテーブルに切り替え
-pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
-    if let Some(pid) = thread.pid {
-        let process_table = thread::uprocess::PROCESS_TABLE.lock();
-        let process = &process_table[pid].expect("process_table does not have the process");
-        let page_table = process.page_table.expect("this process does not have a page-table");
-
-        unsafe {
-            x86_64::registers::control::Cr3::write(page_table, x86_64::registers::control::Cr3Flags::empty());
-        }
-    }
-    else {
-        panic!("this process does not have pid");
-    }
-}
-
-/// カーネルスタックを用意する
-pub fn setup_kstack(thread: &mut thread::Thread) {
-    // カーネルスタックを作成
-    let kstack = unsafe {
-        let layout = alloc::alloc::Layout::from_size_align(thread::STACK_SIZE, 16).unwrap();
-        alloc::alloc::alloc(layout)
-    };
-    let kstack_top = kstack as u64 + thread::STACK_SIZE as u64;
-
-    // カーネルスタックの先頭に TrapFrame を確保
-    let tf_ptr = (kstack_top - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64) as *mut thread::trapframe::TrapFrame;
-    unsafe {
-        tf_ptr.write(thread::trapframe::TrapFrame::new());
-    }
-
-    thread.kstack = kstack_top;
-    thread.context.rsp = kstack_top;
-    thread.tf = Some(tf_ptr);
-}
-
-/// カーネル空間を map する
-unsafe fn setup_kvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, physical_memory_offset: VirtAddr) -> Result<(PhysFrame, *mut PageTable), &'static str> {
-    // 新しい level-4 フレームを allocate
-    let new_frame = frame_allocator.allocate_frame().ok_or("allocating frame failed")?;
-
-    // 新しいページテーブルを初期化
-    let new_table_va = physical_memory_offset + new_frame.start_address().as_u64();
-    let new_table_ptr: *mut PageTable = new_table_va.as_mut_ptr();
-    unsafe {
-        new_table_ptr.write(PageTable::new());
-    }
-
-    // カーネル用領域 をコピー
-    let (current_frame, _) = x86_64::registers::control::Cr3::read();
-    let current_va = physical_memory_offset + current_frame.start_address().as_u64();
-    let current_table_ptr: *const PageTable = current_va.as_ptr();
-    let current_table = unsafe {
-        &*current_table_ptr
-    };
-    let new_table = unsafe {
-        &mut *new_table_ptr
-    };
-
-    for i in PAGETABLE_KERNEL_SPACE_START..PAGETABLE_KERNEL_SPACE_END {
-        new_table[i] = current_table[i].clone();
-    }
-
-    Ok((new_frame, new_table_ptr))
-}
-
-pub fn new_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
-    // physical_memory_offset
-    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
-
-    // 新しい level-4 フレームを allocate
-    let (new_frame, new_table_ptr) = unsafe {
-        setup_kvm(frame_allocator, physical_memory_offset)
-    }?;
-
-    let new_table = unsafe {
-        &mut *new_table_ptr
-    };
-
-    // ユーザ空間のエントリのみクリア
-    let user_code_l4_index = (crate::thread::uprocess::USER_CODE_START >> 39) as usize & 0x1FF;   // 32
-    let user_stack_l4_index = (crate::thread::uprocess::USER_STACK_TOP >> 39) as usize & 0x1FF;   // 64
-    new_table[user_code_l4_index].set_unused();
-    new_table[user_stack_l4_index].set_unused();
-
-    let new_page_table = unsafe {
-        OffsetPageTable::new(&mut *new_table_ptr, physical_memory_offset)
-    };
-
-    Ok((new_page_table, new_frame))
-}
-
-/// 親プロセスのユーザ空間 [0]..[255] を子プロセスにコピー
-pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4: &mut PageTable) -> Result<(OffsetPageTable<'static>, PhysFrame), &'static str> {
-    // physical_memory_offset
-    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
-
-    // 子の PML4 を作成
-    let (child_offset_table, child_pml4_frame) = new_uvm(frame_allocator)?;
-
-    // 子の PML4 への生ポインタを取得
-    let child_pml4_virt = physical_memory_offset + child_pml4_frame.start_address().as_u64();
-    let child_pml4: &mut PageTable = unsafe { &mut *child_pml4_virt.as_mut_ptr() };
-
-    // ユーザ空間 PML4 エントリ (index 0..255) を走査
-    for pml4_idx in PAGETABLE_USER_SPACE_START..PAGETABLE_USER_SPACE_END {
-        if !parent_pml4[pml4_idx].flags().contains(PageTableFlags::PRESENT) {
-            continue;
-        }
-
-        // 子の PDPT を新規割り当て
-        let child_pdpt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PDPT frame")?;
-        init_page_table(child_pdpt_frame, physical_memory_offset);
-
-        // 子の PML4 エントリに書き込む
-        let parent_pdpt_flags = parent_pml4[pml4_idx].flags();
-        child_pml4[pml4_idx].set_frame(child_pdpt_frame, parent_pdpt_flags);
-
-        // 親の PDPT を取得
-        let parent_pdpt = unsafe {
-            table_from_entry(&parent_pml4[pml4_idx], physical_memory_offset)
-        };
-        let child_pdpt = unsafe {
-            table_from_frame(child_pdpt_frame, physical_memory_offset)
-        };
-
-        // PDPT エントリを走査
-        for pdpt_idx in 0..512usize {
-            if !parent_pdpt[pdpt_idx].flags().contains(PageTableFlags::PRESENT) {
-                continue;
-            }
-
-            // 子の PD を新規割り当て
-            let child_pd_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PD frame")?;
-            init_page_table(child_pd_frame, physical_memory_offset);
-
-            let parent_pd_flags = parent_pdpt[pdpt_idx].flags();
-            child_pdpt[pdpt_idx].set_frame(child_pd_frame, parent_pd_flags);
-
-            let parent_pd = unsafe {
-                table_from_entry(&parent_pdpt[pdpt_idx], physical_memory_offset)
-            };
-            let child_pd = unsafe {
-                table_from_frame(child_pd_frame, physical_memory_offset)
-            };
-
-            // PD エントリを走査
-            for pd_idx in 0..512usize {
-                if !parent_pd[pd_idx].flags().contains(PageTableFlags::PRESENT) {
-                    continue;
-                }
-
-                // 子の PT を新規割り当て
-                let child_pt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PT frame")?;
-                init_page_table(child_pt_frame, physical_memory_offset);
-
-                let parent_pt_flags = parent_pd[pd_idx].flags();
-                child_pd[pd_idx].set_frame(child_pt_frame, parent_pt_flags);
-
-                let parent_pt = unsafe {
-                    table_from_entry(&parent_pd[pd_idx], physical_memory_offset)
-                };
-                let child_pt = unsafe {
-                    table_from_frame(child_pt_frame, physical_memory_offset)
-                };
-
-                // PT エントリを走査
-                for pt_idx in 0..512usize {
-                    let parent_pte = &parent_pt[pt_idx];
-                    if !parent_pte.flags().contains(PageTableFlags::PRESENT) {
-                        continue;
-                    }
-
-                    // 新しい物理フレームを確保
-                    let new_frame = frame_allocator
-                        .allocate_frame()
-                        .ok_or("copy_uvm: failed to allocate data frame")?;
-
-                    let src_virt = physical_memory_offset + parent_pte.addr().as_u64();
-                    let dst_virt = physical_memory_offset + new_frame.start_address().as_u64();
-
-                    // ページをコピー
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            src_virt.as_ptr::<u8>(),
-                            dst_virt.as_mut_ptr::<u8>(),
-                            4096,
-                        );
-                    }
-
-                    // 子の PT エントリに新フレームを書き込む
-                    child_pt[pt_idx].set_frame(new_frame, parent_pte.flags());
-                }
-            }
-        }
-    }
-
-    Ok((child_offset_table, child_pml4_frame))
 }
 
 /// フレームをゼロクリアしてページテーブルとして初期化する

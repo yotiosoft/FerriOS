@@ -64,10 +64,10 @@ pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocato
 
     // ユーザページテーブルを作成
     let (mut user_mapper, page_table) = if let Some(parent_pagetable) = parent_pagetable {
-        memory::copy_uvm(frame_allocator, parent_pagetable)
+        memory::umem::copy_uvm(frame_allocator, parent_pagetable)
     }
     else {
-        memory::new_uvm(frame_allocator)
+        memory::umem::new_uvm(frame_allocator)
     }?;
 
     // コードページ用領域を用意
