@@ -1,4 +1,10 @@
-use super::{ FrameAllocator, Size4KiB, VirtAddr, PhysFrame, PageTable, PhysAddr, PageTableEntry, PageTableFlags };
+use core::ptr;
+use alloc::format;
+use x86_64::structures::paging::{Mapper, OffsetPageTable};
+
+use crate::memory;
+
+use super::{ FrameAllocator, Size4KiB, VirtAddr, PhysFrame, PageTable, PhysAddr, Page, PageTableEntry, PageTableFlags };
 
 fn pml4_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 39) & 0x1FF }
 fn pdpt_index(va: VirtAddr) -> usize { (va.as_u64() as usize >> 30) & 0x1FF }
@@ -144,4 +150,18 @@ where
     };
 
     Some(&mut pt[pt_index(va)])
+}
+
+/// ページテーブルにページをマップする
+pub fn map_page(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>, page: Page, flags: PageTableFlags) -> Result<(), &'static str> {
+    let frame = frame_allocator.allocate_frame().ok_or("map_page: frame alloc failed")?;
+    let physical_memory_offset = super::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+    let frame_va = unsafe {
+        phys_to_virt(frame.start_address(), physical_memory_offset)
+    };
+    unsafe {
+        ptr::write_bytes(frame_va.as_mut_ptr::<u8>(), 0, super::PGSIZE);
+        user_mapper.map_to(page, frame, flags, frame_allocator).map_err(|e| format!("map_page: map_to failed. {:?}", e));
+    }
+    Ok(())
 }
