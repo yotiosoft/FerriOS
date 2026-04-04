@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::{ cmp, mem::size_of, ptr };
 use x86_64::{ PhysAddr, VirtAddr, registers::control, structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB, frame, page } };
 
-use crate::cpu;
+use crate::{cpu, memory::va};
 use crate::memory;
 use crate::thread;
 use crate::thread::uprocess::USER_STACK_TOP;
@@ -187,4 +187,38 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
     }
 
     Ok(())
+}
+
+fn setup_user_stack(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, argv: &[Vec<u8>], stack_top: u64) -> Result<(u64, usize, u64), &'static str> {
+    let mut sp = stack_top;
+    let mut argv_ptrs = Vec::new();
+
+    for arg in argv {
+        let arg_len = u64::try_from(arg.len() + 1).map_err(|_| "exec: argument overflow")?;
+        sp = (sp.checked_sub(arg_len).ok_or("exec: stack overflow")?) & !0x7;
+
+        copy_to_user_pagetable(pml4, frame_allocator, sp, arg)?;
+        copy_to_user_pagetable(pml4, frame_allocator, sp + arg.len() as u64, &[0])?;
+        argv_ptrs.push(sp);
+    }
+    argv_ptrs.push(0);
+
+    let argv_bytes = argv_ptrs.len().checked_mul(size_of::<u64>()).ok_or("exec: argv overflow")?;
+    sp = (sp.checked_sub(u64::try_from(argv_bytes).map_err(|_| "exec: argv overflow")?).ok_or("exec: stack overflow")?) & !0xF;
+    let argv_user_ptr = sp;
+    copy_u64_slice_to_user(pml4, frame_allocator, argv_user_ptr, &argv_ptrs)?;
+
+    let ustack = [0xFFFF_FFFF_FFFF_FFFF, argv.len() as u64, argv_user_ptr];
+    sp = sp.checked_sub(u64::try_from(ustack.len() * size_of::<u64>()).map_err(|_| "exec: stack overflow")?).ok_or("exec: stack overflow")?;
+    copy_u64_slice_to_user(pml4, frame_allocator, sp, &ustack)?;
+
+    Ok((sp, argv.len(), argv_user_ptr))
+}
+
+fn copy_u64_slice_to_user(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, dst: u64, data: &[u64]) -> Result<(), &'static str> {
+    let mut bytes = Vec::with_capacity(data.len() * size_of::<u64>());
+    for value in data {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    copy_u64_slice_to_user(pml4, frame_allocator, dst, &bytes)
 }
