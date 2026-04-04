@@ -20,7 +20,7 @@ pub fn fork() -> Result<usize, &'static str> {
 
         // PhysFrame → 仮想アドレス → &mut PageTable
         let virt = unsafe {
-            memory::phys_to_virt(phys_frame.start_address(), physical_memory_offset)
+            memory::va::phys_to_virt(phys_frame.start_address(), physical_memory_offset)
         };
         unsafe { &mut *virt.as_mut_ptr::<PageTable>() }
     };

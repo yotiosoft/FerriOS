@@ -1,4 +1,4 @@
-use super::{ FrameAllocator, Size4KiB,PhysFrame, PageTable, OffsetPageTable, PHYSICAL_MEMORY_OFFSET, PAGETABLE_USER_SPACE_START, PAGETABLE_USER_SPACE_END, PageTableFlags, init_page_table, table_from_entry, table_from_frame };
+use super::{ FrameAllocator, Size4KiB,PhysFrame, PageTable, OffsetPageTable, PHYSICAL_MEMORY_OFFSET, PAGETABLE_USER_SPACE_START, PAGETABLE_USER_SPACE_END, PageTableFlags, va };
 use super::kmem;
 use super::thread;
 
@@ -64,7 +64,7 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
 
         // 子の PDPT を新規割り当て
         let child_pdpt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PDPT frame")?;
-        init_page_table(child_pdpt_frame, physical_memory_offset);
+        va::init_page_table(child_pdpt_frame, physical_memory_offset);
 
         // 子の PML4 エントリに書き込む
         let parent_pdpt_flags = parent_pml4[pml4_idx].flags();
@@ -72,10 +72,10 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
 
         // 親の PDPT を取得
         let parent_pdpt = unsafe {
-            table_from_entry(&parent_pml4[pml4_idx], physical_memory_offset)
+            va::table_from_entry(&parent_pml4[pml4_idx], physical_memory_offset)
         };
         let child_pdpt = unsafe {
-            table_from_frame(child_pdpt_frame, physical_memory_offset)
+            va::table_from_frame(child_pdpt_frame, physical_memory_offset)
         };
 
         // PDPT エントリを走査
@@ -86,16 +86,16 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
 
             // 子の PD を新規割り当て
             let child_pd_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PD frame")?;
-            init_page_table(child_pd_frame, physical_memory_offset);
+            va::init_page_table(child_pd_frame, physical_memory_offset);
 
             let parent_pd_flags = parent_pdpt[pdpt_idx].flags();
             child_pdpt[pdpt_idx].set_frame(child_pd_frame, parent_pd_flags);
 
             let parent_pd = unsafe {
-                table_from_entry(&parent_pdpt[pdpt_idx], physical_memory_offset)
+                va::table_from_entry(&parent_pdpt[pdpt_idx], physical_memory_offset)
             };
             let child_pd = unsafe {
-                table_from_frame(child_pd_frame, physical_memory_offset)
+                va::table_from_frame(child_pd_frame, physical_memory_offset)
             };
 
             // PD エントリを走査
@@ -106,16 +106,16 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
 
                 // 子の PT を新規割り当て
                 let child_pt_frame = frame_allocator.allocate_frame().ok_or("copy_uvm: failed to allocate PT frame")?;
-                init_page_table(child_pt_frame, physical_memory_offset);
+                va::init_page_table(child_pt_frame, physical_memory_offset);
 
                 let parent_pt_flags = parent_pd[pd_idx].flags();
                 child_pd[pd_idx].set_frame(child_pt_frame, parent_pt_flags);
 
                 let parent_pt = unsafe {
-                    table_from_entry(&parent_pd[pd_idx], physical_memory_offset)
+                    va::table_from_entry(&parent_pd[pd_idx], physical_memory_offset)
                 };
                 let child_pt = unsafe {
-                    table_from_frame(child_pt_frame, physical_memory_offset)
+                    va::table_from_frame(child_pt_frame, physical_memory_offset)
                 };
 
                 // PT エントリを走査
