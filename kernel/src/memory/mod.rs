@@ -23,7 +23,7 @@ const PAGETABLE_KERNEL_SPACE_END: usize = 512;
 
 pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 
-const PGSIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr, memory_regions: &'static MemoryRegions) -> OffsetPageTable<'static> {

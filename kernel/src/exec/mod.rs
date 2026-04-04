@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use core::{ cmp, mem::size_of, ptr };
-use x86_64::{ PhysAddr, VirtAddr, registers::control, structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB } };
+use x86_64::{ PhysAddr, VirtAddr, registers::control, structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB, frame, page } };
 
 use crate::cpu;
 use crate::memory;
@@ -36,4 +36,38 @@ pub fn exec(path: &str, argv: &[Vec<u8>]) -> Result<(), &'static str> {
     
 
     Ok(())
+}
+
+fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'static str> {
+    if elf_image.len() < size_of::<elf::Elf64Header>() {
+        return Err("exec: invalid ELF image");
+    }
+
+    let elf = read_elf_header(elf_image)?;
+
+    let mut guard = memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+    let (mut user_mapper, page_table) = memory::umem::new_uvm(frame_allocator)?;
+
+    let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("PHYSICAL_MEMORY_OFFSET not initialized");
+    let pml4 = unsafe {
+        &mut *(memory::va::phys_to_virt(page_table.start_address(), physical_memory_offset).as_mut_ptr::<PageTable>())
+    };
+    load_elf_segments(elf_image, &elf, pml4, &mut user_mapper, frame_allocator)?;
+
+    let stack_top = USER_STACK_TOP;
+    let guard_page = Page::containing_address(VirtAddr::new(stack_top - USER_STACK_PAGES * memory::PAGE_SIZE as u64));
+    let stack_page = Page::containing_address(VirtAddr::new(stack_top - memory::PAGE_SIZE as u64));
+    memory::va::map_page(&mut user_mapper, frame_allocator, guard_page, PageTableFlags::PRESENT | PageTableFlags::WRITABLE)?;
+    memory::va::map_page(&mut user_mapper, frame_allocator, stack_page, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE)?;
+
+    let (user_sp, argc, argv_user_ptr) = setup_user_stack(pml4, frame_allocator, argv, stack_top)?;
+
+    Ok(Exec {
+        page_table,
+        entry: elf.entry,
+        user_sp,
+        argc,
+        argv_user_ptr
+    })
 }

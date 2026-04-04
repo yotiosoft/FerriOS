@@ -160,7 +160,7 @@ pub fn map_page(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mu
         phys_to_virt(frame.start_address(), physical_memory_offset)
     };
     unsafe {
-        ptr::write_bytes(frame_va.as_mut_ptr::<u8>(), 0, super::PGSIZE);
+        ptr::write_bytes(frame_va.as_mut_ptr::<u8>(), 0, super::PAGE_SIZE);
         user_mapper.map_to(page, frame, flags, frame_allocator).map_err(|e| format!("map_page: map_to failed. {:?}", e));
     }
     Ok(())
