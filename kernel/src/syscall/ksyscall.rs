@@ -72,6 +72,15 @@ fn sys_fork() -> u64 {
 }
 
 /// exec
-fn sys_exec(code_ptr: u64, code_len: u64) -> u64 {
-    
+fn sys_exec(path_ptr: u64, argv_ptr: u64) -> u64 {
+    let path = super::copy_cstr_from_user(path_ptr, super::MAX_ARG_LEN).expect("exec: failed to copy_cstr_from_user");
+    let path = core::str::from_utf8(&path).expect("exec: path is not valid UTF-8");
+    let argv = super::copy_argv(argv_ptr).expect("exec: failed to copy argv");
+
+    let ret = crate::exec::exec(path, &argv);
+    if let Err(e) = ret {
+        println!("{}", e);
+        return 1;
+    }
+    0
 }

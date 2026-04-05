@@ -7,10 +7,8 @@ use crate::memory;
 use crate::thread;
 use crate::thread::uprocess::USER_STACK_TOP;
 
-mod user_programs;
+pub mod user_programs;
 
-const MAX_ARGC: usize = 16;
-const MAX_ARG_LEN: usize = 256;
 const ELF_MAGIC_NUM: u32 = 0x464C457F;
 const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LE: u8 = 1;
@@ -67,15 +65,12 @@ pub struct Exec {
 
 pub fn exec(path: &str, argv: &[Vec<u8>]) -> Result<(), &'static str> {
     let elf_image = user_programs::lookup(path).ok_or("exec: program not found")?;
-    let prepared = prepare_exec_image(elf_image, &argv);
+    let prepared = prepare_exec_image(elf_image, &argv)?;
     commit_exec(prepared)?;
-
-    
-
     Ok(())
 }
 
-fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'static str> {
+pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'static str> {
     if elf_image.len() < size_of::<Elf64Header>() {
         return Err("exec: invalid ELF image");
     }
@@ -220,7 +215,7 @@ fn copy_u64_slice_to_user(pml4: &mut PageTable, frame_allocator: &mut impl Frame
     for value in data {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    copy_u64_slice_to_user(pml4, frame_allocator, dst, &bytes)
+    copy_to_user_pagetable(pml4, frame_allocator, dst, &bytes)
 }
 
 fn copy_to_user_pagetable(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, dst: u64, src: &[u8]) -> Result<(), &'static str> {

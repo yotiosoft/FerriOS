@@ -2,6 +2,7 @@ use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, SFMask};
 use x86_64::VirtAddr;
 use core::arch::naked_asm;
 use core::mem::offset_of;
+use alloc::vec::Vec;
 
 use crate::gdt;
 use crate::cpu::Cpu;
@@ -103,3 +104,41 @@ unsafe extern "C" fn syscall_entry() {
 pub const SYS_PRINT_NUM: u64 = 0;
 pub const SYS_PRINT_STR: u64 = 1;
 pub const SYS_FORK: u64 = 2;
+
+/// 引数
+const MAX_ARGC: usize = 16;
+const MAX_ARG_LEN: usize = 256;
+
+fn copy_argv(argv_ptr: u64) -> Result<Vec<Vec<u8>>, &'static str> {
+    let mut argv = Vec::new();
+    if argv_ptr == 0 {
+        return Ok(argv);
+    }
+
+    for i in 0..MAX_ARGC {
+        let user_arg_ptr = unsafe { *((argv_ptr as *const u64).add(i)) };
+        if user_arg_ptr == 0 {
+            return Ok(argv);
+        }
+        argv.push(copy_cstr_from_user(user_arg_ptr, MAX_ARG_LEN)?);
+    }
+
+    Err("exec: too many arguments")
+}
+
+fn copy_cstr_from_user(ptr: u64, max_len: usize) -> Result<Vec<u8>, &'static str> {
+    if ptr == 0 {
+        return Err("exec: null argument pointer");
+    }
+
+    let mut bytes = Vec::new();
+    for i in 0..max_len {
+        let byte = unsafe { *((ptr as *const u8).add(i)) };
+        if byte == 0 {
+            return Ok(bytes);
+        }
+        bytes.push(byte);
+    }
+
+    Err("exec: argument is too long")
+}

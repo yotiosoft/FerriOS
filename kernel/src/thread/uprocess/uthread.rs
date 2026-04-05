@@ -21,17 +21,18 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
     thread.context.cs = gdt::GDT.1.user_code_selector.0 as u64;
     thread.context.ss = gdt::GDT.1.user_data_selector.0 as u64;
     thread.context.rsp3 = USER_STACK_TOP;
+    thread.context.user_rip = USER_CODE_START;
 
     Ok(thread)
 }
 
 /// init process 用の trampoline
 unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
-    let (cs, ss, rsp3, rip) = {
+    let (cs, ss, rsp3, rip, user_rdi, user_rsi) = {
         let table = THREAD_TABLE.lock();
         let tid = cpu::CPU.lock().current_tid().expect("No running thread");
         let ctx =&table[tid].context;
-        (ctx.cs, ctx.ss, ctx.rsp3, USER_CODE_START)
+        (ctx.cs, ctx.ss, ctx.rsp3, ctx.user_rip, ctx.user_rdi, ctx.user_rsi)
     };
 
     let rip = USER_CODE_START;
@@ -59,12 +60,16 @@ unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
             "xor r13, r13",
             "xor r14, r14",
             "xor r15, r15",
+            "mov rdi, {user_rdi}",
+            "mov rsi, {user_rsi}",
             "iretq",            // switch: cs, ss, rsp, rflags
             inout("ax") ss => _,
             cs = in(reg) cs,
             rsp3 = in(reg) rsp3,
             rflags = in(reg) 0x202u64,
             rip = in(reg) rip,
+            user_rdi = in(reg) user_rdi,
+            user_rsi = in(reg) user_rsi,
         );
     }
 

@@ -3,7 +3,7 @@ use spin::Mutex;
 use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
 use lazy_static::lazy_static;
 
-use crate::{memory, thread};
+use crate::{ memory, exec };
 
 use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
 
@@ -110,6 +110,37 @@ pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocato
     add_to_process_table(process)?;
 
     // 全スレッドを Runnable としてマーク
+    mark_threads_as_runnable(process)?;
+
+    Ok(())
+}
+
+/// 実行する ELF ファイルを指定してユーザプロセスを生成
+pub fn create_user_process_from_path(path: &str) -> Result<(), &'static str> {
+    let elf = exec::user_programs::lookup(path).ok_or("program not found")?;
+    let prepared = exec::prepare_exec_image(elf, &[])?;
+
+    let mut process = alloc_proc()?;
+    process.page_table = Some(prepared.page_table);
+
+    {
+        let mut thread_table = THREAD_TABLE.lock();
+        let tid = process.threads[0].expect("no first thread");
+        let thread = &mut thread_table[tid];
+        thread.context.rsp3 = prepared.user_sp;
+        thread.context.user_rip = prepared.entry;
+        thread.context.user_rdi = prepared.argc as u64;
+        thread.context.user_rsi = prepared.argv_user_ptr;
+
+        let tf = thread.tf.ok_or("no trapframe")?;
+        unsafe {
+            (*tf).rdi = prepared.argc as u64;
+            (*tf).rsi = prepared.argv_user_ptr;
+            (*tf).rcx = prepared.entry;
+        }
+    }
+
+    add_to_process_table(process)?;
     mark_threads_as_runnable(process)?;
 
     Ok(())
