@@ -25,6 +25,9 @@ pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 
 pub const PAGE_SIZE: usize = 4096;
 
+pub const STACK_PAGES: usize = 8;
+pub const STACK_SIZE: usize = PAGE_SIZE * STACK_PAGES;
+
 /// 新しい OffsetPageTable を初期化する
 pub unsafe fn init(physical_memory_offset: VirtAddr, memory_regions: &'static MemoryRegions) -> OffsetPageTable<'static> {
     // カーネルページテーブルアドレスを取得

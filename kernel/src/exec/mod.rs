@@ -15,7 +15,6 @@ const ELF_DATA_LE: u8 = 1;
 const ELF_TYPE_EXEC: u16 = 2;
 const ELF_MACHINE_X86_64: u16 = 0x3E;
 const ELF_PROG_LOAD: u32 = 1;
-const USER_STACK_PAGES: u64 = 2;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -88,10 +87,30 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
     load_elf_segments(elf_image, elf, pml4, &mut user_mapper, frame_allocator)?;
 
     let stack_top = USER_STACK_TOP;
-    let guard_page = Page::containing_address(VirtAddr::new(stack_top - USER_STACK_PAGES * memory::PAGE_SIZE as u64));
-    let stack_page = Page::containing_address(VirtAddr::new(stack_top - memory::PAGE_SIZE as u64));
-    memory::va::map_page(&mut user_mapper, frame_allocator, guard_page, PageTableFlags::PRESENT | PageTableFlags::WRITABLE)?;
-    memory::va::map_page(&mut user_mapper, frame_allocator, stack_page, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE)?;
+    let stack_pages = memory::STACK_PAGES as u64;
+    let stack_bytes = stack_pages
+        .checked_mul(memory::PAGE_SIZE as u64)
+        .ok_or("exec: stack size overflow")?;
+    let stack_start = stack_top.checked_sub(stack_bytes).ok_or("exec: stack overflow")?;
+    let guard_page_start = stack_start
+        .checked_sub(memory::PAGE_SIZE as u64)
+        .ok_or("exec: guard page overflow")?;
+
+    let guard_page = Page::containing_address(VirtAddr::new(guard_page_start));
+    let stack_start_page = Page::containing_address(VirtAddr::new(stack_start));
+    memory::va::map_page(
+        &mut user_mapper,
+        frame_allocator,
+        guard_page,
+        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+    )?;
+    memory::va::map_pages(
+        &mut user_mapper,
+        frame_allocator,
+        stack_start_page,
+        stack_pages,
+        PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+    )?;
 
     let (user_sp, argc, argv_user_ptr) = setup_user_stack(pml4, frame_allocator, argv, stack_top)?;
 

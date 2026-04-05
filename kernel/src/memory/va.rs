@@ -1,5 +1,4 @@
 use core::ptr;
-use alloc::format;
 use x86_64::structures::paging::{Mapper, OffsetPageTable};
 
 use crate::memory;
@@ -161,7 +160,28 @@ pub fn map_page(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mu
     };
     unsafe {
         ptr::write_bytes(frame_va.as_mut_ptr::<u8>(), 0, super::PAGE_SIZE);
-        user_mapper.map_to(page, frame, flags, frame_allocator).map_err(|e| format!("map_page: map_to failed. {:?}", e));
+        user_mapper
+            .map_to(page, frame, flags, frame_allocator)
+            .map_err(|_| "map_page: map_to failed")?
+            .flush();
+    }
+    Ok(())
+}
+
+/// 連続するページをマップする
+pub fn map_pages(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>, start_page: Page, num_pages: u64, flags: PageTableFlags) -> Result<(), &'static str> {
+    for i in 0..num_pages {
+        let offset = i
+            .checked_mul(super::PAGE_SIZE as u64)
+            .ok_or("map_pages: page offset overflow")?;
+        let va_u64 = start_page
+            .start_address()
+            .as_u64()
+            .checked_add(offset)
+            .ok_or("map_pages: virtual address overflow")?;
+        let va = VirtAddr::new(va_u64);
+        let page = Page::containing_address(va);
+        map_page(user_mapper, frame_allocator, page, flags)?;
     }
     Ok(())
 }

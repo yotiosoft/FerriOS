@@ -1,4 +1,4 @@
-use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
+use super::{ THREAD_TABLE, ThreadState };
 use crate::memory;
 
 pub const NTHREAD: usize = 64;

@@ -35,7 +35,6 @@ unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
         (ctx.cs, ctx.ss, ctx.rsp3, ctx.user_rip, ctx.user_rdi, ctx.user_rsi)
     };
 
-    let rip = USER_CODE_START;
     unsafe {
         core::arch::asm!(
             "mov ds, ax",

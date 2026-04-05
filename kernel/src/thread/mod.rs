@@ -8,8 +8,6 @@ pub mod trapframe;
 
 extern crate alloc;
 
-pub static STACK_SIZE: usize = 4096 * 4;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
     Unused,

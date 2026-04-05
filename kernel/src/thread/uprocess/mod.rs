@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 
 use crate::{ memory, exec };
 
-use super::{ STACK_SIZE, THREAD_TABLE, ThreadState };
+use super::{ THREAD_TABLE, ThreadState };
 
 mod uthread;
 pub mod syscalls;
@@ -15,7 +15,6 @@ pub const USER_CODE_START: u64 = 0x0000_1000_0000_0000;
 
 /// ユーザスタック
 pub const USER_STACK_TOP: u64 = 0x0000_2000_0000_0000;
-pub const USER_STACK_PAGES: u64 = 4;
 
 /// 最大プロセス数
 pub const NPROCESS: usize = 16;
@@ -91,9 +90,9 @@ pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocato
     }
 
     // ユーザスタック用領域を用意
-    let stack_start = USER_STACK_TOP - USER_STACK_PAGES * 4096;
-    for i in 0..USER_STACK_PAGES {
-        let page = Page::containing_address(VirtAddr::new(stack_start + i * 4096));
+    let stack_start = USER_STACK_TOP - memory::STACK_SIZE as u64;
+    for i in 0..memory::STACK_PAGES as u64 {
+        let page = Page::containing_address(VirtAddr::new(stack_start + i * memory::PAGE_SIZE as u64));
         let frame = frame_allocator.allocate_frame().ok_or("frame alloc failed")?;
         unsafe {
             user_mapper.map_to(page, frame, user_flags, frame_allocator).map_err(|_| "stack map_to failed")?.flush();

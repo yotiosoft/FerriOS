@@ -2,6 +2,7 @@ use super::{ KERNEL_PAGE_TABLE_FRAME, FrameAllocator, Size4KiB, VirtAddr, PhysFr
 use x86_64::registers::control::Cr3Flags;
 
 use crate::thread;
+use crate::memory;
 
 /// カーネルページテーブルに切り替え
 pub unsafe fn switch_to_kernel_page_table() {
@@ -17,10 +18,10 @@ pub unsafe fn switch_to_kernel_page_table() {
 pub fn setup_kstack(thread: &mut thread::Thread) {
     // カーネルスタックを作成
     let kstack = unsafe {
-        let layout = alloc::alloc::Layout::from_size_align(thread::STACK_SIZE, 16).unwrap();
+        let layout = alloc::alloc::Layout::from_size_align(memory::STACK_SIZE, 16).unwrap();
         alloc::alloc::alloc(layout)
     };
-    let kstack_top = kstack as u64 + thread::STACK_SIZE as u64;
+    let kstack_top = kstack as u64 + memory::STACK_SIZE as u64;
 
     // カーネルスタックの先頭に TrapFrame を確保
     let tf_ptr = (kstack_top - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64) as *mut thread::trapframe::TrapFrame;
