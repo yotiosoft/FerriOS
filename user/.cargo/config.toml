@@ -1,0 +1,3 @@
+[build]
+target = "../x86_64-ferrios.json"
+rustflags = ["-C", "link-arg=-Tuser/linker.ld"]
