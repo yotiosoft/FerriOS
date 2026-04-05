@@ -222,3 +222,30 @@ fn copy_u64_slice_to_user(pml4: &mut PageTable, frame_allocator: &mut impl Frame
     }
     copy_u64_slice_to_user(pml4, frame_allocator, dst, &bytes)
 }
+
+fn copy_to_user_pagetable(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, dst: u64, src: &[u8]) -> Result<(), &'static str> {
+    let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("PHYSICAL_MEMORY_OFFSET not initialized");
+    let mut written = 0 as usize;
+
+    while written < src.len() {
+        let va = VirtAddr::new(dst + written as u64);
+        let page_offset = usize::from(va.page_offset());
+        let to_copy = cmp::min(memory::PAGE_SIZE - page_offset, src.len() - written);
+        let pte = unsafe {
+            memory::va::walk_pagetable(pml4, va, false, physical_memory_offset, frame_allocator)
+        }.ok_or("exec: address is not mapped")?;
+        if !pte.flags().contains(PageTableFlags::PRESENT) {
+            return Err("exec: address is not present");
+        }
+
+        let page_va = unsafe {
+            memory::va::phys_to_virt(PhysAddr::new(pte.addr().as_u64()), physical_memory_offset)
+        };
+        unsafe {
+            ptr::copy_nonoverlapping(src[written..(written + to_copy)].as_ptr(), page_va.as_mut_ptr::<u8>().add(page_offset), to_copy);
+        }
+        written += to_copy;
+    }
+
+    Ok(())
+}
