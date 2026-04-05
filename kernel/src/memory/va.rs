@@ -45,7 +45,7 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Opt
 pub fn init_page_table(frame: PhysFrame, physical_memory_offset: VirtAddr) {
     let virt = physical_memory_offset + frame.start_address().as_u64();
     unsafe {
-        core::ptr::write_bytes(virt.as_mut_ptr::<u8>(), 0, 4096);
+        core::ptr::write_bytes(virt.as_mut_ptr::<u8>(), 0, super::PAGE_SIZE);
     }
 }
 

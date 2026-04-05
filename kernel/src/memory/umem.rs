@@ -138,7 +138,7 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
                         core::ptr::copy_nonoverlapping(
                             src_virt.as_ptr::<u8>(),
                             dst_virt.as_mut_ptr::<u8>(),
-                            4096,
+                            super::PAGE_SIZE,
                         );
                     }
 

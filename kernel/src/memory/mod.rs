@@ -91,7 +91,7 @@ impl BootInfoFrameAllocator {
         // それぞれの領域をアドレス範囲に map で変換する
         let addr_ranges = usable_regions.map(|r| r.start..r.end);
         // フレームの開始アドレスのイテレータへと変換する
-        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
+        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(PAGE_SIZE));
         // 開始アドレスから PhysFrame 型を得る
         frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
     }
