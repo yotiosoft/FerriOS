@@ -36,6 +36,7 @@ pub struct Elf64Header {
 }
 
 impl Elf64Header {
+    /// ELF 識別子先頭4バイトを magic 値として返す
     fn magic(&self) -> u32 {
         u32::from_le_bytes([self.ident[0], self.ident[1], self.ident[2], self.ident[3]])
     }
@@ -62,6 +63,7 @@ pub struct Exec {
     pub argv_user_ptr: u64,
 }
 
+/// パスからユーザプログラムを解決して exec を完了する
 pub fn exec(path: &str, argv: &[Vec<u8>]) -> Result<(), &'static str> {
     let elf_image = user_programs::lookup(path).ok_or("exec: program not found")?;
     let prepared = prepare_exec_image(elf_image, &argv)?;
@@ -69,6 +71,7 @@ pub fn exec(path: &str, argv: &[Vec<u8>]) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// ELF と argv から新しい実行イメージを準備する
 pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'static str> {
     if elf_image.len() < size_of::<Elf64Header>() {
         return Err("exec: invalid ELF image");
@@ -86,6 +89,7 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
     };
     load_elf_segments(elf_image, elf, pml4, &mut user_mapper, frame_allocator)?;
 
+    // ユーザスタック範囲を計算し、先頭側にガードページを置く
     let stack_top = USER_STACK_TOP;
     let stack_pages = memory::STACK_PAGES as u64;
     let stack_bytes = stack_pages
@@ -98,12 +102,14 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
 
     let guard_page = Page::containing_address(VirtAddr::new(guard_page_start));
     let stack_start_page = Page::containing_address(VirtAddr::new(stack_start));
+    // ガードページ（U=0）を1枚確保
     memory::va::map_page(
         &mut user_mapper,
         frame_allocator,
         guard_page,
         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
     )?;
+    // 実際のユーザスタックを複数ページで確保
     memory::va::map_pages(
         &mut user_mapper,
         frame_allocator,
@@ -123,6 +129,7 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
     })
 }
 
+/// ELF ヘッダを読み取り、対象アーキテクチャなどを検証する
 fn read_elf_header(image: &[u8]) -> Result<Elf64Header, &'static str> {
     if image.len() < size_of::<Elf64Header>() {
         return Err("exec: ELF header is truncated");
@@ -148,6 +155,7 @@ fn read_elf_header(image: &[u8]) -> Result<Elf64Header, &'static str> {
     Ok(elf)
 }
 
+/// LOAD セグメントをユーザページテーブルへマップして内容を配置する
 fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
     let pa_offset = usize::try_from(elf.phoff).map_err(|_| "exec: invalid phoff")?;
     let pa_entry_size = usize::from(elf.phentsize);
@@ -203,6 +211,7 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
     Ok(())
 }
 
+/// 初期ユーザスタックを構築し、argc/argv の配置先を返す
 fn setup_user_stack(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, argv: &[Vec<u8>], stack_top: u64) -> Result<(u64, usize, u64), &'static str> {
     let mut sp = stack_top;
     let mut argv_ptrs = Vec::new();
@@ -229,6 +238,7 @@ fn setup_user_stack(pml4: &mut PageTable, frame_allocator: &mut impl FrameAlloca
     Ok((sp, argv.len(), argv_user_ptr))
 }
 
+/// `u64` 配列をリトルエンディアン列にしてユーザ空間へコピーする
 fn copy_u64_slice_to_user(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, dst: u64, data: &[u64]) -> Result<(), &'static str> {
     let mut bytes = Vec::with_capacity(data.len() * size_of::<u64>());
     for value in data {
@@ -237,6 +247,7 @@ fn copy_u64_slice_to_user(pml4: &mut PageTable, frame_allocator: &mut impl Frame
     copy_to_user_pagetable(pml4, frame_allocator, dst, &bytes)
 }
 
+/// 現在構築中のユーザページテーブルに任意バイト列を書き込む
 fn copy_to_user_pagetable(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, dst: u64, src: &[u8]) -> Result<(), &'static str> {
     let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("PHYSICAL_MEMORY_OFFSET not initialized");
     let mut written = 0 as usize;
@@ -264,6 +275,7 @@ fn copy_to_user_pagetable(pml4: &mut PageTable, frame_allocator: &mut impl Frame
     Ok(())
 }
 
+/// ユーザ空間の指定範囲をゼロクリアする
 fn zero_user_range(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, start: u64, len: u64) -> Result<(), &'static str> {
     let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("PHYSICAL_MEMORY_OFFSET not initialized");
     let mut cleared = 0 as u64;
@@ -291,6 +303,7 @@ fn zero_user_range(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocat
     Ok(())
 }
 
+/// 準備済み実行イメージを現在プロセス/スレッドへ反映する
 fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
     let (current_tid, current_pid) = {
         let cpu = cpu::CPU.lock();
@@ -326,6 +339,7 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
 
     let (old_cr3, old_cr3_flags) = control::Cr3::read();
 
+    // 反映本体（途中で失敗したら下でロールバックする）
     let commit_result = (|| -> Result<(), &'static str> {
         {
             let mut process_table = thread::uprocess::PROCESS_TABLE.lock();

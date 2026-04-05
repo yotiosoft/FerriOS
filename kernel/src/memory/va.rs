@@ -170,6 +170,7 @@ pub fn map_page(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mu
 
 /// 連続するページをマップする
 pub fn map_pages(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>, start_page: Page, num_pages: u64, flags: PageTableFlags) -> Result<(), &'static str> {
+    // start_page から num_pages 分を順番に map する
     for i in 0..num_pages {
         let offset = i
             .checked_mul(super::PAGE_SIZE as u64)
