@@ -249,3 +249,30 @@ fn copy_to_user_pagetable(pml4: &mut PageTable, frame_allocator: &mut impl Frame
 
     Ok(())
 }
+
+fn zero_user_range(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocator<Size4KiB>, start: u64, len: u64) -> Result<(), &'static str> {
+    let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("PHYSICAL_MEMORY_OFFSET not initialized");
+    let mut cleared = 0 as u64;
+
+    while cleared < len {
+        let va = VirtAddr::new(start + cleared);
+        let page_offset = usize::from(va.page_offset());
+        let to_zero = cmp::min(memory::PAGE_SIZE - page_offset, usize::try_from(len - cleared).unwrap_or(usize::MAX));
+        let pte = unsafe {
+            memory::va::walk_pagetable(pml4, va, false, physical_memory_offset, frame_allocator)
+        }.ok_or("exec: address is not mapped")?;
+        if !pte.flags().contains(PageTableFlags::PRESENT) {
+            return Err("exec: address is not present");
+        }
+
+        let page_va = unsafe {
+            memory::va::phys_to_virt(PhysAddr::new(pte.addr().as_u64()), physical_memory_offset)
+        };
+        unsafe {
+            ptr::write_bytes(page_va.as_mut_ptr::<u8>().add(page_offset), 0, to_zero);
+        }
+        cleared += to_zero as u64;
+    }
+
+    Ok(())
+}
