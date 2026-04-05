@@ -29,7 +29,8 @@ pub fn create_user_thread() -> Result<Thread, &'static str> {
 unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
     let (cs, ss, rsp3, rip) = {
         let table = THREAD_TABLE.lock();
-        let ctx =&table[super::super::current_tid().expect("No running thread")].context;
+        let tid = cpu::CPU.lock().current_tid().expect("No running thread");
+        let ctx =&table[tid].context;
         (ctx.cs, ctx.ss, ctx.rsp3, USER_CODE_START)
     };
 

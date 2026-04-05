@@ -69,12 +69,6 @@ pub fn next_tid() -> Option<usize> {
     None
 }
 
-/// 現在実行中のスレッドの tid を取得
-pub fn current_tid() -> Option<usize> {
-    let cpu = cpu::CPU.lock();
-    cpu.current_tid
-}
-
 /// スケジューラからきりかわた直後に一度だけ実行される関数
 /// 割り込みを有効化
 extern "C" fn kthread_entry() -> ! {

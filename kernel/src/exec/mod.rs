@@ -182,7 +182,7 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
             memory::va::map_page(user_mapper, frame_allocator, page, flags)?;
         }
 
-        zero_user_range(pml4, frame_allocator, program_header.vaddr, flags)?;
+        zero_user_range(pml4, frame_allocator, program_header.vaddr, program_header.memsz)?;
         copy_to_user_pagetable(pml4, frame_allocator, program_header.vaddr, &image[file_start..file_end])?;
     }
 
@@ -272,6 +272,50 @@ fn zero_user_range(pml4: &mut PageTable, frame_allocator: &mut impl FrameAllocat
             ptr::write_bytes(page_va.as_mut_ptr::<u8>().add(page_offset), 0, to_zero);
         }
         cleared += to_zero as u64;
+    }
+
+    Ok(())
+}
+
+fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
+    let (current_tid, current_pid) = {
+        let cpu = cpu::CPU.lock();
+        (
+            cpu.current_tid().ok_or("exec: no current thread id")?,
+            cpu.current_pid().ok_or("exec: no current process id")?,
+        )
+    };
+
+    {
+        let mut process_table = thread::uprocess::PROCESS_TABLE.lock();
+        let process = process_table[current_pid].as_mut().ok_or("exec: proces table entry missing")?;
+        process.page_table = Some(prepared.page_table);
+    }
+
+    {
+        let mut thread_table = thread::THREAD_TABLE.lock();
+        let thread = &mut thread_table[current_tid];
+        thread.context.rsp3 = prepared.user_sp;
+        thread.context.user_rip = prepared.entry;
+        thread.context.user_rdi = prepared.argc as u64;
+        thread.context.user_rsi = prepared.argv_user_ptr;
+
+        let trap_frame = thread.tf.ok_or("exec: no trapframe")?;
+        unsafe {
+            (*trap_frame).rax = 0;
+            (*trap_frame).rdi = prepared.argc as u64;
+            (*trap_frame).rsi = prepared.argv_user_ptr;
+            (*trap_frame).rcx = prepared.entry;
+        }
+    }
+
+    {
+        let mut cpu = cpu::CPU.lock();
+        cpu.saved_user_rsp = prepared.user_sp;
+    }
+    
+    unsafe {
+        x86_64::registers::control::Cr3::write(prepared.page_table, x86_64::registers::control::Cr3Flags::empty());
     }
 
     Ok(())
