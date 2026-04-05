@@ -18,6 +18,7 @@ pub extern "C" fn syscall_dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3:
         super::SYS_PRINT_NUM => sys_print_num(arg1),
         super::SYS_PRINT_STR => sys_print_str(arg1, arg2),
         super::SYS_FORK => sys_fork(),
+        super::SYS_EXEC => sys_exec(arg1, arg2),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             u64::MAX  // エラー

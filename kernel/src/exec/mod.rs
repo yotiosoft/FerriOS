@@ -300,37 +300,102 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
         )
     };
 
-    {
-        let mut process_table = thread::uprocess::PROCESS_TABLE.lock();
-        let process = process_table[current_pid].as_mut().ok_or("exec: proces table entry missing")?;
-        process.page_table = Some(prepared.page_table);
-    }
+    // ロールバック用のスナップショットを作成しておく
+    let old_page_table = {
+        let process_table = thread::uprocess::PROCESS_TABLE.lock();
+        let process = process_table
+            .get(current_pid)
+            .and_then(|p| p.as_ref())
+            .ok_or("exec: process table entry missing")?;
+        process.page_table
+    };
 
-    {
-        let mut thread_table = thread::THREAD_TABLE.lock();
-        let thread = &mut thread_table[current_tid];
-        thread.context.rsp3 = prepared.user_sp;
-        thread.context.user_rip = prepared.entry;
-        thread.context.user_rdi = prepared.argc as u64;
-        thread.context.user_rsi = prepared.argv_user_ptr;
-
+    let (old_context, old_trap_frame, old_saved_user_rsp) = {
+        let thread_table = thread::THREAD_TABLE.lock();
+        let thread = thread_table
+            .get(current_tid)
+            .ok_or("exec: thread table entry missing")?;
         let trap_frame = thread.tf.ok_or("exec: no trapframe")?;
+        let old_tf = unsafe { *trap_frame };
+        let old_context = thread.context;
+        drop(thread_table);
+
+        let cpu = cpu::CPU.lock();
+        (old_context, old_tf, cpu.saved_user_rsp)
+    };
+
+    let (old_cr3, old_cr3_flags) = control::Cr3::read();
+
+    let commit_result = (|| -> Result<(), &'static str> {
+        {
+            let mut process_table = thread::uprocess::PROCESS_TABLE.lock();
+            let process = process_table
+                .get_mut(current_pid)
+                .and_then(|p| p.as_mut())
+                .ok_or("exec: process table entry missing")?;
+            process.page_table = Some(prepared.page_table);
+        }
+
+        {
+            let mut thread_table = thread::THREAD_TABLE.lock();
+            let thread = thread_table
+                .get_mut(current_tid)
+                .ok_or("exec: thread table entry missing")?;
+            thread.context.rsp3 = prepared.user_sp;
+            thread.context.user_rip = prepared.entry;
+            thread.context.user_rdi = prepared.argc as u64;
+            thread.context.user_rsi = prepared.argv_user_ptr;
+
+            let trap_frame = thread.tf.ok_or("exec: no trapframe")?;
+            unsafe {
+                (*trap_frame).rax = 0;
+                (*trap_frame).rdi = prepared.argc as u64;
+                (*trap_frame).rsi = prepared.argv_user_ptr;
+                (*trap_frame).rcx = prepared.entry;
+            }
+        }
+
+        {
+            let mut cpu = cpu::CPU.lock();
+            cpu.saved_user_rsp = prepared.user_sp;
+        }
+
         unsafe {
-            (*trap_frame).rax = 0;
-            (*trap_frame).rdi = prepared.argc as u64;
-            (*trap_frame).rsi = prepared.argv_user_ptr;
-            (*trap_frame).rcx = prepared.entry;
+            control::Cr3::write(prepared.page_table, control::Cr3Flags::empty());
+        }
+        Ok(())
+    })();
+
+    if commit_result.is_err() {
+        // 途中失敗時はロールバック
+        if let Some(old_pt) = old_page_table {
+            let mut process_table = thread::uprocess::PROCESS_TABLE.lock();
+            if let Some(process) = process_table.get_mut(current_pid).and_then(|p| p.as_mut()) {
+                process.page_table = Some(old_pt);
+            }
+        }
+
+        {
+            let mut thread_table = thread::THREAD_TABLE.lock();
+            if let Some(thread) = thread_table.get_mut(current_tid) {
+                thread.context = old_context;
+                if let Some(trap_frame) = thread.tf {
+                    unsafe {
+                        *trap_frame = old_trap_frame;
+                    }
+                }
+            }
+        }
+
+        {
+            let mut cpu = cpu::CPU.lock();
+            cpu.saved_user_rsp = old_saved_user_rsp;
+        }
+
+        unsafe {
+            control::Cr3::write(old_cr3, old_cr3_flags);
         }
     }
 
-    {
-        let mut cpu = cpu::CPU.lock();
-        cpu.saved_user_rsp = prepared.user_sp;
-    }
-    
-    unsafe {
-        x86_64::registers::control::Cr3::write(prepared.page_table, x86_64::registers::control::Cr3Flags::empty());
-    }
-
-    Ok(())
+    commit_result
 }
