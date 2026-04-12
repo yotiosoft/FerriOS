@@ -69,6 +69,7 @@ fn main() {
     println!("cargo:rerun-if-changed=abi/Cargo.toml");
     println!("cargo:rerun-if-changed=user/src");
     println!("cargo:rerun-if-changed=user/linker.ld");
+    println!("cargo:rerun-if-changed=user/build.rs");
     println!("cargo:rerun-if-changed=user/Cargo.toml");
     println!("cargo:rerun-if-changed=user/.cargo/config.toml");
     println!("cargo:rerun-if-changed=userlib/src");

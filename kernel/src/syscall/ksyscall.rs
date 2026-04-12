@@ -52,10 +52,14 @@ fn sys_print_str(ptr: u64, len: u64) -> u64 {
     if len > 256 {
         return u64::MAX;
     }
-    let slice = unsafe {
-        core::slice::from_raw_parts(ptr as *const u8, len as usize)
+    let bytes = match super::copy_bytes_from_user(ptr, len as usize) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            crate::println!("[syscall] print_str copy error: {}", e);
+            return u64::MAX;
+        }
     };
-    if let Ok(s) = core::str::from_utf8(slice) {
+    if let Ok(s) = core::str::from_utf8(&bytes) {
         crate::println!("[syscall] print_str: {}", s);
         0
     } else {

@@ -47,3 +47,14 @@ pub fn print_num(num: u64) -> u64 {
         syscall(abi::SYS_PRINT_NUM, args)
     }
 }
+
+pub fn print_str(s: &str) -> u64 {
+    let args = SyscallArgs {
+        arg1: Some(s.as_ptr() as u64),
+        arg2: Some(s.len() as u64),
+        ..Default::default()
+    };
+    unsafe {
+        syscall(abi::SYS_PRINT_STR, args)
+    }
+}
