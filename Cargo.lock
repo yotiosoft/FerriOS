@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "abi"
+version = "0.1.0"
+
+[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -178,6 +182,7 @@ dependencies = [
 name = "ferrios"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "bootloader_api",
  "conquer-once",
  "crossbeam-queue",
@@ -658,6 +663,9 @@ dependencies = [
 [[package]]
 name = "userlib"
 version = "0.1.0"
+dependencies = [
+ "abi",
+]
 
 [[package]]
 name = "uuid"

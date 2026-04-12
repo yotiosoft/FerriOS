@@ -100,12 +100,6 @@ unsafe extern "C" fn syscall_entry() {
     )
 }
 
-/// システムコール番号
-pub const SYS_PRINT_NUM: u64 = 0;
-pub const SYS_PRINT_STR: u64 = 1;
-pub const SYS_FORK: u64 = 2;
-pub const SYS_EXEC: u64 = 3;
-
 /// 引数
 const MAX_ARGC: usize = 16;
 const MAX_ARG_LEN: usize = 256;

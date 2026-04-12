@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "user", "userlib"]
+members = ["abi","kernel", "user", "userlib"]
 
 [package]
 name = "ferrios-runner"

@@ -65,10 +65,14 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", kernel_manifest.display());
     println!("cargo:rerun-if-changed=kernel/src");
+    println!("cargo:rerun-if-changed=abi/src");
+    println!("cargo:rerun-if-changed=abi/Cargo.toml");
     println!("cargo:rerun-if-changed=user/src");
     println!("cargo:rerun-if-changed=user/linker.ld");
     println!("cargo:rerun-if-changed=user/Cargo.toml");
     println!("cargo:rerun-if-changed=user/.cargo/config.toml");
+    println!("cargo:rerun-if-changed=userlib/src");
+    println!("cargo:rerun-if-changed=userlib/Cargo.toml");
     println!("cargo:rerun-if-changed=x86_64-ferrios.json");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());

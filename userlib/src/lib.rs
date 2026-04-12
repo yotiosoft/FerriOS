@@ -1,11 +1,7 @@
 #![no_std]
 
 use core::arch::asm;
-
-pub const SYS_PRINT_NUM: u64 = 0;
-pub const SYS_PRINT_STR: u64 = 1;
-pub const SYS_FORK: u64 = 2;
-pub const SYS_EXEC: u64 = 3;
+use abi::*;
 
 struct SyscallArgs {
     arg1: Option<u64>,
@@ -48,6 +44,6 @@ pub fn print_num(num: u64) -> u64 {
         ..Default::default()
     };
     unsafe {
-        syscall(SYS_PRINT_NUM, args)
+        syscall(abi::SYS_PRINT_NUM, args)
     }
 }
