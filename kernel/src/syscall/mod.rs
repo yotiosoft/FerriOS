@@ -70,6 +70,8 @@ unsafe extern "C" fn syscall_entry() {
         "mov rdi, r10",
         // rsi, rdx はユーザが設定した値がそのまま残っている
         "call {syscall_dispatch}",
+        // syscall_dispatch の戻り値を退避する
+        "mov r10, rax",
 
         // レジスタを復元
         "pop r15",
@@ -81,9 +83,12 @@ unsafe extern "C" fn syscall_entry() {
         "pop rdx",
         "pop rsi",
         "pop rdi",
-        "pop rax",
+        // 保存していた syscall 番号は破棄する
+        "add rsp, 8",
         "pop r11",
         "pop rcx",
+        // ユーザへ返す戻り値を rax に戻す
+        "mov rax, r10",
 
         // ユーザ RSP を復元
         "mov rsp, gs:[{saved_user_rsp}]",
