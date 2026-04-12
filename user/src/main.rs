@@ -11,7 +11,7 @@ pub extern "C" fn _start() -> ! {
         if ret != 0 {
             panic!("something went wrong..");
         }
-        let ret = print_str("Hello");
+        let ret = print_str("Hello!");
         if ret != 0 {
             panic!("something went wrong..");
         }

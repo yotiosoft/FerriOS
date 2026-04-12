@@ -176,6 +176,13 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
         if program_header.prog_type != ELF_PROG_LOAD {
             continue;
         }
+        crate::println!(
+            "[exec] LOAD vaddr={:#x}, filesz={:#x}, memsz={:#x}, flags={:#x}",
+            program_header.vaddr,
+            program_header.filesz,
+            program_header.memsz,
+            program_header.flags,
+        );
         if program_header.memsz < program_header.filesz {
             return Err("exec: invalid LOAD segment sizes");
         }

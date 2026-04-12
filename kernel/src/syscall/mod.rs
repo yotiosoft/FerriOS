@@ -12,6 +12,7 @@ mod ksyscall;
 
 const OFFSET_SAVED_USER_RSP: usize = offset_of!(Cpu, saved_user_rsp);
 const OFFSET_KERNEL_SYSCALL_RSP: usize = offset_of!(Cpu, kernel_syscall_rsp);
+const OFFSET_SAVED_RAX: usize = 72;
 
 pub fn init() -> Result<(), &'static str> {
     unsafe {
@@ -45,12 +46,12 @@ unsafe extern "C" fn syscall_entry() {
         "mov gs:[{saved_user_rsp}], rsp",
         "mov rsp, gs:[{kernel_syscall_rsp}]",
 
-        // push する前に syscall番号を別レジスタに退避
-        "mov r10, rax",
-
         // レジスタを退避
         "push rcx",   // sysretq 用 RIP
         "push r11",   // sysretq 用 RFLAGS
+        "push r10",
+        "push r9",
+        "push r8",
         "push rax",   // syscall 番号
         "push rdi",
         "push rsi",
@@ -64,6 +65,7 @@ unsafe extern "C" fn syscall_entry() {
 
         // syscall_dispatch(number=rax, arg0=rdi, arg1=rsi, arg2=rdx)
         // 引数は rdi, rsi, rdx に入っている
+        "mov r10, rax",
         "mov r8,  rsp",
         "mov rcx, rdx",
         "mov rdx, rsi",
@@ -71,8 +73,8 @@ unsafe extern "C" fn syscall_entry() {
         "mov rdi, r10",
         // rsi, rdx はユーザが設定した値がそのまま残っている
         "call {syscall_dispatch}",
-        // syscall_dispatch の戻り値を退避する
-        "mov r10, rax",
+        // syscall_dispatch の戻り値を保存済み rax スロットへ反映する
+        "mov [rsp + {saved_rax_offset}], rax",
 
         // レジスタを復元
         "pop r15",
@@ -84,12 +86,12 @@ unsafe extern "C" fn syscall_entry() {
         "pop rdx",
         "pop rsi",
         "pop rdi",
-        // 保存していた syscall 番号は破棄する
-        "add rsp, 8",
+        "pop rax",
+        "pop r8",
+        "pop r9",
+        "pop r10",
         "pop r11",
         "pop rcx",
-        // ユーザへ返す戻り値を rax に戻す
-        "mov rax, r10",
 
         // ユーザ RSP を復元
         "mov rsp, gs:[{saved_user_rsp}]",
@@ -102,6 +104,7 @@ unsafe extern "C" fn syscall_entry() {
 
         saved_user_rsp     = const OFFSET_SAVED_USER_RSP,
         kernel_syscall_rsp = const OFFSET_KERNEL_SYSCALL_RSP,
+        saved_rax_offset   = const OFFSET_SAVED_RAX,
         syscall_dispatch   = sym ksyscall::syscall_dispatch,
     )
 }
@@ -149,6 +152,12 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
         return Err("syscall: null pointer");
     }
 
+    crate::println!(
+        "[syscall] copy_bytes_from_user ptr={:#x}, len={}",
+        ptr,
+        len
+    );
+
     let process_page_table = {
         let cpu = crate::cpu::CPU.lock();
         cpu.current_process()
@@ -186,7 +195,10 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
                 frame_allocator,
             )
         }
-        .ok_or("syscall: address is not mapped")?;
+        .ok_or_else(|| {
+            crate::println!("[syscall] unmapped va={:#x}", va.as_u64());
+            "syscall: address is not mapped"
+        })?;
 
         if !pte.flags().contains(x86_64::structures::paging::PageTableFlags::PRESENT) {
             return Err("syscall: address is not present");

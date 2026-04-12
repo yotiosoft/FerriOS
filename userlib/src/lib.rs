@@ -3,58 +3,36 @@
 use core::arch::asm;
 use abi::*;
 
-struct SyscallArgs {
-    arg1: Option<u64>,
-    arg2: Option<u64>,
-    arg3: Option<u64>,
-}
-impl Default for SyscallArgs {
-    fn default() -> Self {
-        SyscallArgs {
-            arg1: None,
-            arg2: None,
-            arg3: None,
-        }
-    }
-}
-
-unsafe fn syscall(num: u64, args: SyscallArgs) -> u64 {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn syscall(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     let ret: u64;
-    let arg1 = args.arg1.unwrap_or_default();
-    let arg2 = args.arg2.unwrap_or_default();
-    let arg3 = args.arg3.unwrap_or_default();
-
     unsafe {
         asm!(
+            "mov rax, rdi",
+            "mov rdi, rsi",
+            "mov rsi, rdx",
+            "mov rdx, rcx",
             "syscall",
-            inlateout("rax") num => ret,
-            in("rdi") arg1,
-            in("rsi") arg2,
-            in("rdx") arg3,
-            lateout("rcx") _,
+            inlateout("rdi") num => _,
+            inlateout("rsi") arg1 => _,
+            inlateout("rdx") arg2 => _,
+            inlateout("rcx") arg3 => _,
+            lateout("rax") ret,
             lateout("r11") _,
+            options(nostack),
         );
     }
     ret
 }
 
 pub fn print_num(num: u64) -> u64 {
-    let args = SyscallArgs {
-        arg1: Some(num),
-        ..Default::default()
-    };
     unsafe {
-        syscall(abi::SYS_PRINT_NUM, args)
+        syscall(SYS_PRINT_NUM, num, 0, 0)
     }
 }
 
 pub fn print_str(s: &str) -> u64 {
-    let args = SyscallArgs {
-        arg1: Some(s.as_ptr() as u64),
-        arg2: Some(s.len() as u64),
-        ..Default::default()
-    };
     unsafe {
-        syscall(abi::SYS_PRINT_STR, args)
+        syscall(SYS_PRINT_STR, s.as_ptr() as u64, s.len() as u64, 0)
     }
 }
