@@ -5,4 +5,4 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
-userlib = { path = "../userlib" }
+userlib = { path = "../../userlib" }
