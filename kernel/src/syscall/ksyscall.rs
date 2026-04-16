@@ -43,7 +43,7 @@ pub extern "C" fn set_trapframe(tf_ptr: *mut thread::trapframe::TrapFrame) {
 /// 数値を表示する
 fn sys_print_num(n: u64) -> u64 {
     crate::println!("[syscall] print_num: {}", n);
-    0
+    abi::RET_SUCCESS
 }
 
 /// 文字列を表示する（ポインタ + 長さ）
@@ -61,7 +61,7 @@ fn sys_print_str(ptr: u64, len: u64) -> u64 {
     };
     if let Ok(s) = core::str::from_utf8(&bytes) {
         crate::println!("[syscall] print_str: {}", s);
-        0
+        abi::RET_SUCCESS
     } else {
         u64::MAX
     }
@@ -75,7 +75,7 @@ fn sys_fork() -> u64 {
         return 1;
     }
     println!("success");
-    return 0;
+    return abi::RET_SUCCESS;
 }
 
 /// exec
@@ -87,7 +87,18 @@ fn sys_exec(path_ptr: u64, argv_ptr: u64) -> u64 {
     let ret = crate::exec::exec(path, &argv);
     if let Err(e) = ret {
         println!("{}", e);
-        return 1;
+        return abi::RET_ERROR;
     }
     0
+}
+
+/// getpid
+fn sys_getpid() -> u64 {
+    let pid = thread::uprocess::syscalls::getpid();
+    if let Ok(pid) = pid {
+        return pid as u64;
+    }
+    else {
+        return abi::RET_ERROR;
+    }
 }

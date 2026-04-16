@@ -113,6 +113,7 @@ unsafe extern "C" fn syscall_entry() {
 const MAX_ARGC: usize = 16;
 const MAX_ARG_LEN: usize = 256;
 
+/// 引数を vector にコピー
 fn copy_argv(argv_ptr: u64) -> Result<Vec<Vec<u8>>, &'static str> {
     let mut argv = Vec::new();
     if argv_ptr == 0 {
@@ -130,6 +131,7 @@ fn copy_argv(argv_ptr: u64) -> Result<Vec<Vec<u8>>, &'static str> {
     Err("exec: too many arguments")
 }
 
+/// user から kernel に string をコピー
 fn copy_cstr_from_user(ptr: u64, max_len: usize) -> Result<Vec<u8>, &'static str> {
     if ptr == 0 {
         return Err("exec: null argument pointer");
@@ -147,6 +149,7 @@ fn copy_cstr_from_user(ptr: u64, max_len: usize) -> Result<Vec<u8>, &'static str
     Err("exec: argument is too long")
 }
 
+/// user から kernel にバイナリをコピー
 fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
     if ptr == 0 {
         return Err("syscall: null pointer");

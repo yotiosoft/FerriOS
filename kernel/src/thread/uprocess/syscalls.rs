@@ -62,3 +62,15 @@ pub fn fork() -> Result<usize, &'static str> {
 
     Ok(process.pid)
 }
+
+pub fn getpid() -> Result<usize, &'static str> {
+    let cpu = cpu::CPU.lock();
+    let pid = cpu.current_pid();
+
+    if let Some(pid) = pid {
+        return Ok(pid);
+    }
+    else {
+        return Err("no process")?;
+    }
+}
