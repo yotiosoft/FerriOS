@@ -36,3 +36,21 @@ pub fn print_str(s: &str) -> u64 {
         syscall(SYS_PRINT_STR, s.as_ptr() as u64, s.len() as u64, 0)
     }
 }
+
+pub fn fork() -> u64 {
+    unsafe {
+        syscall(SYS_FORK, 0, 0, 0)
+    }
+}
+
+pub fn exec(path_ptr: &str, argv_ptr: u64) -> u64 {
+    unsafe {
+        syscall(SYS_EXEC, path_ptr.as_ptr() as u64, argv_ptr, 0)
+    }
+}
+
+pub fn getpid() -> u64 {
+    unsafe {
+        syscall(SYS_GETPID, 0, 0, 0)
+    }
+}
