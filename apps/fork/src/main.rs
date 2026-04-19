@@ -12,7 +12,7 @@ pub extern "C" fn _start() -> ! {
     }
 
     let pid = getpid();
-    print_num(pid);
+    print_num(pid as i64);
 
     loop {}
 }

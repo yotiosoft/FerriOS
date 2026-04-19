@@ -1,12 +1,18 @@
 #![no_std]
 
+/// type: syscall number
+pub type SyscallNum = i64;
+
+/// type: return value
+pub type SysRet = i64;
+
 /// syscall numbers
-pub const SYS_PRINT_NUM: u64 = 1;
-pub const SYS_PRINT_STR: u64 = 2;
-pub const SYS_FORK: u64 = 3;
-pub const SYS_EXEC: u64 = 4;
-pub const SYS_GETPID: u64 = 5;
+pub const SYS_PRINT_NUM: SyscallNum = 1;
+pub const SYS_PRINT_STR: SyscallNum = 2;
+pub const SYS_FORK: SyscallNum = 3;
+pub const SYS_EXEC: SyscallNum = 4;
+pub const SYS_GETPID: SyscallNum = 5;
 
 /// return values
-pub const RET_SUCCESS: u64 = 0;
-pub const RET_ERROR: u64 = 1;
+pub const RET_SUCCESS: SysRet = 0;
+pub const RET_ERROR: SysRet = -1;
