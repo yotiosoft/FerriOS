@@ -6,6 +6,11 @@ use userlib::*;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    let ret = fork();
+    if ret == RET_ERROR {
+        panic!("failed to call fork()");
+    }
+
     loop { 
         let ret = print_num(123);
         if ret != 0 {
