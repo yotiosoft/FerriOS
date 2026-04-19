@@ -7,7 +7,7 @@ use abi::*;
 /// Rustから呼ばれるディスパッチャ
 /// 戻り値はRAXに入る
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_dispatch(syscall_num: Syscall, arg1: i64, arg2: i64, arg3: i64, tf: *mut thread::trapframe::TrapFrame) -> SysRet {
+pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64, arg3: i64, tf: *mut thread::trapframe::TrapFrame) -> SysRet {
     {
         let cpu = crate::cpu::CPU.lock();
         let tid = cpu.current_tid.expect("no current thread");

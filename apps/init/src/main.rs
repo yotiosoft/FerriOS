@@ -10,17 +10,16 @@ pub extern "C" fn _start() -> ! {
     if ret == RET_ERROR {
         panic!("failed to call fork()");
     }
-
-    loop { 
-        let ret = print_num(123);
-        if ret != 0 {
-            panic!("something went wrong..");
-        }
-        let ret = print_str("Hello!");
-        if ret != 0 {
-            panic!("something went wrong..");
-        }
+    if ret == 0 {
+        loop {}
     }
+
+    let ret = exec("/fork", &[]);
+    if ret == RET_ERROR {
+        panic!("failed to call exec()");
+    }
+
+    loop {}
 }
 
 #[panic_handler]
