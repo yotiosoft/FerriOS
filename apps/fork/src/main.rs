@@ -8,7 +8,7 @@ use userlib::*;
 pub extern "C" fn _start() -> ! {
     let pid = getpid();
     loop {
-        print_num(pid as i64);
+        print_fmt!("[child] pid = {}", pid);
     }
 }
 

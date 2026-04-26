@@ -1,10 +1,12 @@
 #![no_std]
 
 use core::arch::asm;
+use core::fmt::{self, Write};
 pub use abi::*;
 
 const EXEC_MAX_ARGC: usize = 16;
 const EXEC_MAX_ARG_LEN: usize = 256;
+const PRINT_FMT_BUF_LEN: usize = 256;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall(num: SyscallNum, arg1: i64, arg2: i64, arg3: i64) -> SysRet {
@@ -51,6 +53,14 @@ pub fn print_str(s: &str) -> SysRet {
     }
 }
 
+pub fn print_fmt(args: fmt::Arguments<'_>) -> SysRet {
+    let mut buf = StackBuf::new();
+    if buf.write_fmt(args).is_err() {
+        return RET_ERROR;
+    }
+    print_str(buf.as_str())
+}
+
 pub fn fork() -> SysRet {
     unsafe {
         syscall(SYS_FORK, 0, 0, 0)
@@ -86,4 +96,43 @@ pub fn getpid() -> SysRet {
     unsafe {
         syscall(SYS_GETPID, 0, 0, 0)
     }
+}
+
+struct StackBuf {
+    bytes: [u8; PRINT_FMT_BUF_LEN],
+    len: usize,
+}
+
+impl StackBuf {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; PRINT_FMT_BUF_LEN],
+            len: 0,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
+    }
+}
+
+impl Write for StackBuf {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let new_len = self.len.checked_add(bytes.len()).ok_or(fmt::Error)?;
+        if new_len > self.bytes.len() {
+            return Err(fmt::Error);
+        }
+
+        self.bytes[self.len..new_len].copy_from_slice(bytes);
+        self.len = new_len;
+        Ok(())
+    }
+}
+
+#[macro_export]
+macro_rules! print_fmt {
+    ($($arg:tt)*) => {{
+        $crate::print_fmt(core::format_args!($($arg)*))
+    }};
 }

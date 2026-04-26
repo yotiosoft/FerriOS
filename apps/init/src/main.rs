@@ -18,8 +18,10 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
+    // on the parent process
+    let pid = getpid();
     loop {
-        print_str("loop!");
+        print_fmt!("[parent] pid = {}", pid);
     }
 }
 

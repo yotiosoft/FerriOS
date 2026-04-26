@@ -208,7 +208,7 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
         }
 
         for page in Page::range_inclusive(start_page, end_page) {
-            memory::va::map_page(user_mapper, frame_allocator, page, flags)?;
+            ensure_user_page_mapping(pml4, user_mapper, frame_allocator, page, flags)?;
         }
 
         zero_user_range(pml4, frame_allocator, program_header.vaddr, program_header.memsz)?;
@@ -216,6 +216,36 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
     }
 
     Ok(())
+}
+
+fn ensure_user_page_mapping(
+    pml4: &mut PageTable,
+    user_mapper: &mut OffsetPageTable<'static>,
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+    page: Page,
+    flags: PageTableFlags,
+) -> Result<(), &'static str> {
+    let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("PHYSICAL_MEMORY_OFFSET not initialized");
+    let pte = unsafe {
+        memory::va::walk_pagetable(
+            pml4,
+            page.start_address(),
+            false,
+            physical_memory_offset,
+            frame_allocator,
+        )
+    };
+
+    if let Some(entry) = pte {
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            entry.set_flags(entry.flags() | flags);
+            return Ok(());
+        }
+    }
+
+    memory::va::map_page(user_mapper, frame_allocator, page, flags)
 }
 
 /// 初期ユーザスタックを構築し、argc/argv の配置先を返す
