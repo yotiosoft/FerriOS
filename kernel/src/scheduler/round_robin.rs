@@ -1,4 +1,4 @@
-use crate::memory;
+use crate::{gdt, memory, thread};
 
 use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, cpu::CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
@@ -65,6 +65,12 @@ impl super::Scheduler for RoundRobin {
 
                         // CPU の syscall_rsp をスレッドの kstack に変更
                         cpu.kernel_syscall_rsp = table[next_tid].kstack;
+                        // ユーザモードからの割り込み/例外は TSS.rsp0 を使う。
+                        // TrapFrame 用に確保した領域を踏まないよう、その直前を使う。
+                        gdt::set_privilege_stack_0(
+                            table[next_tid].kstack
+                                - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64
+                        );
 
                         drop(cpu);
                         drop(table);

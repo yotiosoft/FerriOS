@@ -57,7 +57,13 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     // CS の下位2ビットが CPL（現在の特権レベル）
     let cpl = stack_frame.code_segment & 0b11;
     if cpl == 3 {
-        println!("Ring 3 confirmed! rip={:#x}", stack_frame.instruction_pointer);
+        let cpu = crate::cpu::CPU.lock();
+        println!(
+            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x}",
+            cpu.current_tid(),
+            cpu.current_pid(),
+            stack_frame.instruction_pointer
+        );
     }
 
     unsafe {

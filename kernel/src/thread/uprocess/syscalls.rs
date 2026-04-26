@@ -31,13 +31,14 @@ pub fn fork() -> Result<usize, &'static str> {
     // ページテーブル設定
     process.page_table = Some(page_table);
 
-    // 親プロセスの trapframe をコピー
-    let parent_tf: thread::trapframe::TrapFrame = {
+    // 親プロセスの trapframe とユーザ復帰情報をコピー
+    let (parent_tf, parent_user_rsp): (thread::trapframe::TrapFrame, u64) = {
         let cpu = crate::cpu::CPU.lock();
         let tid = cpu.current_tid.expect("no current thread");
+        let saved_user_rsp = cpu.saved_user_rsp;
         drop(cpu);
         let thread_table = crate::thread::THREAD_TABLE.lock();
-        unsafe { *thread_table[tid].tf.expect("no trapframe") }
+        (unsafe { *thread_table[tid].tf.expect("no trapframe") }, saved_user_rsp)
     };
     {
         let mut table = crate::thread::THREAD_TABLE.lock();
@@ -49,6 +50,21 @@ pub fn fork() -> Result<usize, &'static str> {
 
         // xv6: np->tf->eax = 0 (子の fork 戻り値を 0 に)
         unsafe { (*child.tf.expect("no trapframe")).rax = 0; }
+
+        // 子は fork から復帰する形で最初にユーザ空間へ入る
+        child.context.rsp3 = parent_user_rsp;
+        child.context.user_rip = parent_tf.rcx;
+        child.context.user_rdi = parent_tf.rdi;
+        child.context.user_rsi = parent_tf.rsi;
+
+        crate::println!(
+            "[fork] child pid={}, tid={}, user_rip={:#x}, rsp3={:#x}, rax={:#x}",
+            process.pid,
+            child_tid,
+            child.context.user_rip,
+            child.context.rsp3,
+            unsafe { (*child.tf.expect("no trapframe")).rax },
+        );
     }
 
     // ステータスの設定

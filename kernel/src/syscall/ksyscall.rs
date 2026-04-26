@@ -21,6 +21,7 @@ pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64
         abi::SYS_PRINT_STR => sys_print_str(arg1 as u64, arg2),
         abi::SYS_FORK => sys_fork(),
         abi::SYS_EXEC => sys_exec(arg1 as u64, arg2 as u64),
+        abi::SYS_GETPID => sys_getpid(),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             SysRet::MAX  // エラー

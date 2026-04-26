@@ -62,3 +62,10 @@ pub fn init() {
         load_tss(GDT.1.tss_selector);   // Task State Segment Selector
     }
 }
+
+pub fn set_privilege_stack_0(rsp0: u64) {
+    unsafe {
+        let tss_ptr = &*TSS as *const TaskStateSegment as *mut TaskStateSegment;
+        (*tss_ptr).privilege_stack_table[0] = VirtAddr::new(rsp0);
+    }
+}

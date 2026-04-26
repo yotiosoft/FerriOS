@@ -6,15 +6,10 @@ use userlib::*;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    let ret = fork();
-    if ret == 0 {
-        panic!("failed to call fork()");
-    }
-
     let pid = getpid();
-    print_num(pid as i64);
-
-    loop {}
+    loop {
+        print_num(pid as i64);
+    }
 }
 
 #[panic_handler]

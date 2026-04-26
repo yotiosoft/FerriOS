@@ -49,9 +49,6 @@ unsafe extern "C" fn syscall_entry() {
         // レジスタを退避
         "push rcx",   // sysretq 用 RIP
         "push r11",   // sysretq 用 RFLAGS
-        "push r10",
-        "push r9",
-        "push r8",
         "push rax",   // syscall 番号
         "push rdi",
         "push rsi",
@@ -87,9 +84,6 @@ unsafe extern "C" fn syscall_entry() {
         "pop rsi",
         "pop rdi",
         "pop rax",
-        "pop r8",
-        "pop r9",
-        "pop r10",
         "pop r11",
         "pop rcx",
 
