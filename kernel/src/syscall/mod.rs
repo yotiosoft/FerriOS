@@ -149,12 +149,6 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
         return Err("syscall: null pointer");
     }
 
-    crate::println!(
-        "[syscall] copy_bytes_from_user ptr={:#x}, len={}",
-        ptr,
-        len
-    );
-
     let process_page_table = {
         let cpu = crate::cpu::CPU.lock();
         cpu.current_process()

@@ -56,7 +56,7 @@ pub fn fork() -> Result<usize, &'static str> {
         child.context.user_rip = parent_tf.rcx;
         child.context.user_rdi = parent_tf.rdi;
         child.context.user_rsi = parent_tf.rsi;
-
+        
         crate::println!(
             "[fork] child pid={}, tid={}, user_rip={:#x}, rsp3={:#x}, rax={:#x}",
             process.pid,

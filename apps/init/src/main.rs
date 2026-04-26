@@ -11,15 +11,16 @@ pub extern "C" fn _start() -> ! {
         panic!("failed to call fork()");
     }
     if ret == 0 {
-        loop {}
+        // on the child process
+        let ret = exec("/fork", &[]);
+        if ret == RET_ERROR {
+            panic!("failed to call exec()");
+        }
     }
 
-    let ret = exec("/fork", &[]);
-    if ret == RET_ERROR {
-        panic!("failed to call exec()");
+    loop {
+        print_str("loop!");
     }
-
-    loop {}
 }
 
 #[panic_handler]
