@@ -5,7 +5,7 @@ use core::panic::PanicInfo;
 use userlib::*;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn main() -> ! {
     let pid = getpid();
     loop {
         print_fmt!("[child] pid = {}", pid);
