@@ -12,7 +12,7 @@ pub extern "C" fn main() -> ! {
     }
     if ret == 0 {
         // on the child process
-        let ret = exec("/fork", &[]);
+        let ret = exec("/child", &[]);
         if ret == RET_ERROR {
             panic!("failed to call exec()");
         }
