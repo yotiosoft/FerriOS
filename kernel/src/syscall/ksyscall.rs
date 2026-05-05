@@ -8,14 +8,8 @@ use abi::*;
 /// 戻り値はRAXに入る
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64, arg3: i64, tf: *mut thread::trapframe::TrapFrame) -> SysRet {
-    {
-        let cpu = crate::cpu::CPU.lock();
-        let tid = cpu.current_tid.expect("no current thread");
-        drop(cpu);
-        let mut table = crate::thread::THREAD_TABLE.lock();
-        table[tid].tf = Some(tf);
-    }
-
+    set_trapframe(tf);
+    
     match syscall_num {
         abi::SYS_PRINT_NUM => sys_print_num(arg1),
         abi::SYS_PRINT_STR => sys_print_str(arg1 as u64, arg2),

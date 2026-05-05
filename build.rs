@@ -57,12 +57,12 @@ fn discover_apps(apps_root: &Path) -> Vec<AppBuild> {
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let kernel_manifest = PathBuf::from(&manifest_dir).join("kernel/Cargo.toml");
-    let apps_root = PathBuf::from(&manifest_dir).join("apps");
+    let apps_root = PathBuf::from(&manifest_dir).join("user");
     let app_target = PathBuf::from(&manifest_dir).join("x86_64-ferrios.json");
     let target_dir = PathBuf::from(&manifest_dir).join("target/kernel-build");
-    let apps_target_dir = PathBuf::from(&manifest_dir).join("target/apps-build");
+    let apps_target_dir = PathBuf::from(&manifest_dir).join("target/user-build");
     let apps = discover_apps(&apps_root);
-    assert!(!apps.is_empty(), "no app crates found under apps/");
+    assert!(!apps.is_empty(), "no app crates found under user/");
 
     // --release かどうか検知
     let profile = std::env::var("PROFILE").unwrap();
