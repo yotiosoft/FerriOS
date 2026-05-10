@@ -12,6 +12,7 @@ pub const SYS_PRINT_STR: SyscallNum = 2;
 pub const SYS_FORK: SyscallNum = 3;
 pub const SYS_EXEC: SyscallNum = 4;
 pub const SYS_GETPID: SyscallNum = 5;
+pub const SYS_UPTIME: SyscallNum = 6;
 
 /// return values
 pub const RET_SUCCESS: SysRet = 0;

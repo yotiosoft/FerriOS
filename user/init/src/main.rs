@@ -21,7 +21,7 @@ pub extern "C" fn main() -> ! {
     // on the parent process
     let pid = getpid();
     loop {
-        print_fmt!("[parent] pid = {}", pid);
+        print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
     }
 }
 

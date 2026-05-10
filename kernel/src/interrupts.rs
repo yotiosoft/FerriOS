@@ -94,11 +94,10 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     if cpl == 3 {
         let cpu = crate::cpu::CPU.lock();
         println!(
-            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x} ticks={}",
+            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x}",
             cpu.current_tid(),
             cpu.current_pid(),
-            stack_frame.instruction_pointer,
-            get_ticks()
+            stack_frame.instruction_pointer
         );
     }
 
