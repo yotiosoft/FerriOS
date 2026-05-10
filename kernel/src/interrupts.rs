@@ -1,7 +1,7 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
-use spin;
+use spin::{self, Mutex};
 use crate::println;
 use crate::gdt;
 use crate::hlt_loop;
@@ -9,6 +9,8 @@ use crate::scheduler;
 
 const PIT_BASE_FREQUENCY: u32 = 1_193_182;
 pub const TIMER_FREQUENCY_HZ: u32 = 100;
+
+static TICKS: Mutex<u64> = Mutex::new(0);
 
 // まだヒープが存在しないため、IDT は静的変数として定義する
 lazy_static! {
@@ -48,6 +50,15 @@ pub fn init_pit_timer(frequency_hz: u32) {
     }
 }
 
+fn countup_ticks() {
+    let mut ticks = TICKS.lock();
+    *ticks += 1;
+}
+
+pub fn get_ticks() -> u64 {
+    x86_64::instructions::interrupts::without_interrupts(|| *TICKS.lock())
+}
+
 /// ブレークポイント例外ハンドラ
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
@@ -75,15 +86,19 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
 
+    // TICKS をカウントアップ
+    countup_ticks();
+
     // CS の下位2ビットが CPL（現在の特権レベル）
     let cpl = stack_frame.code_segment & 0b11;
     if cpl == 3 {
         let cpu = crate::cpu::CPU.lock();
         println!(
-            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x}",
+            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x} ticks={}",
             cpu.current_tid(),
             cpu.current_pid(),
-            stack_frame.instruction_pointer
+            stack_frame.instruction_pointer,
+            get_ticks()
         );
     }
 
