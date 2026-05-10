@@ -6,6 +6,12 @@ pub type SyscallNum = i64;
 /// type: return value
 pub type SysRet = i64;
 
+/// type: process id
+pub type ProcessID = usize;
+
+/// type: thread id
+pub type ThreadID = usize;
+
 /// syscall numbers
 pub const SYS_PRINT_NUM: SyscallNum = 1;
 pub const SYS_PRINT_STR: SyscallNum = 2;

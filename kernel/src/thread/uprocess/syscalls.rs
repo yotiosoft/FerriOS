@@ -1,9 +1,16 @@
 use crate::memory;
 use crate::cpu;
+use crate::scheduler::yield_from_context;
 use crate::thread;
+use crate::thread::ThreadState;
+use crate::thread::uprocess::remove_from_process_table;
 use x86_64::structures::paging::PageTable;
+use abi::{ ProcessID, ThreadID };
 
-pub fn fork() -> Result<usize, &'static str> {
+static INIT_PID: ProcessID = 0;
+static INIT_TID: ThreadID = 0;
+
+pub fn fork() -> Result<ProcessID, &'static str> {
     // プロセス割り当て
     let mut process = super::alloc_proc()?;
 
@@ -79,7 +86,7 @@ pub fn fork() -> Result<usize, &'static str> {
     Ok(process.pid)
 }
 
-pub fn getpid() -> Result<usize, &'static str> {
+pub fn getpid() -> Result<ProcessID, &'static str> {
     let cpu = cpu::CPU.lock();
     let pid = cpu.current_pid();
 
@@ -89,4 +96,29 @@ pub fn getpid() -> Result<usize, &'static str> {
     else {
         return Err("no process")?;
     }
+}
+
+pub fn exit() -> Result<(), &'static str> {
+    let cpu = cpu::CPU.lock();
+    let mut thread = cpu.current_thread().ok_or("no thread")?;
+    if thread.tid == INIT_TID {
+        return Err("init exiting");
+    }
+
+    // ToDo: このスレッドが開いている全てのファイルを close する
+
+    // ToDo: このスレッドを wait している親プロセスを wakeup させる
+
+    // ToDo: このスレッドの子スレッドを init thread の子スレッドに変更する
+
+    // スレッドを ZOMBIE 状態に変更する
+    thread.state = ThreadState::Zombie;
+
+    // スケジューラに移行する
+    // このシステムコールが return することはない（コンパイルを通すため Ok(()) を返してるけど…）
+    yield_from_context();
+
+    panic!("zonbie exit");
+
+    Ok(())
 }

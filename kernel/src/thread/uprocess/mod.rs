@@ -2,6 +2,7 @@ use alloc::string::ToString;
 use spin::Mutex;
 use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
 use lazy_static::lazy_static;
+use abi::ProcessID;
 
 use crate::{ memory, exec };
 
@@ -25,7 +26,7 @@ pub const NTHREAD_PER_PROCESS: usize = 8;
 /// Process Control Block (PCB)
 #[derive(Debug, Clone, Copy)]
 pub struct Process {
-    pub pid: usize,
+    pub pid: ProcessID,
     pub threads: [Option<usize>; NTHREAD_PER_PROCESS],
     pub nthread: usize,
     pub page_table: Option<PhysFrame>,
@@ -173,7 +174,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
 }
 
 /// PID 割り当て
-fn next_pid() -> Result<usize, &'static str> {
+fn next_pid() -> Result<ProcessID, &'static str> {
     let table = PROCESS_TABLE.lock();
     for i in 0..NPROCESS-1 {
         if table[i].is_none() {
@@ -194,6 +195,21 @@ fn add_to_process_table(process: Process) -> Result<(), &'static str> {
     process_table[process.pid] = Some(process);
 
     Ok(())
+}
+
+/// プロセスを Process Table から削除
+fn remove_from_process_table(pid: ProcessID) -> Result<(), &'static str> {
+    let mut process_table = PROCESS_TABLE.lock();
+
+    if let Some(i) = process_table
+        .iter()
+        .position(|p| p.as_ref().is_some_and(|p| p.pid == pid))
+    {
+        process_table[i] = None;
+        Ok(())
+    } else {
+        Err("no such pid in the process table")
+    }
 }
 
 /// プロセス内の全スレッドを Runnable としてマークする

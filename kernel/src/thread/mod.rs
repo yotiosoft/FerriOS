@@ -1,6 +1,7 @@
 use crate::scheduler;
 use scheduler::context::Context;
 use crate::cpu;
+use abi::ThreadID;
 
 pub mod kthread;
 pub mod uprocess;
@@ -21,7 +22,7 @@ pub enum ThreadState {
 /// Process Control Block
 #[derive(Debug, Clone, Copy)]
 pub struct Thread {
-    pub tid: usize,                             // Thread ID
+    pub tid: ThreadID,                          // Thread ID
     pub pid: Option<usize>,                     // Process ID (ユーザプロセスの場合)
     pub state: ThreadState,                     // スレッドの状態
     pub context: Context,                       // スレッドのコンテキスト
