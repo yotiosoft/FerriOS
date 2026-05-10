@@ -2,10 +2,13 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, Pag
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
-use crate::{print, println};
+use crate::println;
 use crate::gdt;
 use crate::hlt_loop;
 use crate::scheduler;
+
+const PIT_BASE_FREQUENCY: u32 = 1_193_182;
+pub const TIMER_FREQUENCY_HZ: u32 = 100;
 
 // まだヒープが存在しないため、IDT は静的変数として定義する
 lazy_static! {
@@ -25,6 +28,24 @@ lazy_static! {
 }
 pub fn init_idt() {
     IDT.load();
+}
+
+pub fn init_pit_timer(frequency_hz: u32) {
+    use x86_64::instructions::port::Port;
+
+    assert!(frequency_hz > 0);
+
+    let divisor = PIT_BASE_FREQUENCY / frequency_hz;
+    assert!(divisor > 0);
+    assert!(divisor <= u16::MAX as u32);
+
+    let mut command_port = Port::new(0x43);
+    let mut data_port = Port::new(0x40);
+    unsafe {
+        command_port.write(0x36u8);
+        data_port.write((divisor & 0xFF) as u8);
+        data_port.write((divisor >> 8) as u8);
+    }
 }
 
 /// ブレークポイント例外ハンドラ
