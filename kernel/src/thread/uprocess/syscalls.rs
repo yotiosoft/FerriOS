@@ -3,6 +3,7 @@ use crate::cpu;
 use crate::scheduler::yield_from_context;
 use crate::thread;
 use crate::thread::ThreadState;
+use crate::thread::uprocess::PROCESS_TABLE;
 use crate::thread::uprocess::remove_from_process_table;
 use x86_64::structures::paging::PageTable;
 use abi::{ ProcessID, ThreadID };
@@ -121,4 +122,18 @@ pub fn exit() -> Result<(), &'static str> {
     panic!("zonbie exit");
 
     Ok(())
+}
+
+pub fn wait() -> Result<(), &'static str> {
+    let mut process_table = PROCESS_TABLE.lock();
+
+    loop {
+        let mut havekids = 0;
+
+        for i in 0..super::NPROCESS-1 {
+            if let Some(process) = &mut process_table[i] {
+                process.pid = 1;
+            }
+        }
+    }
 }
