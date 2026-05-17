@@ -144,7 +144,7 @@ pub fn exit() -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn wait() -> Result<(), &'static str> {
+pub fn wait() -> Result<ProcessID, &'static str> {
     let pid = cpu::CPU.lock().current_pid().expect("no pid");
 
     loop {
@@ -176,7 +176,7 @@ pub fn wait() -> Result<(), &'static str> {
 
         if let Some(child) = zombie_child.as_mut() {
             super::free_process(child)?;
-            return Ok(());
+            return Ok(child.pid);
         }
 
         if !havekids {

@@ -19,6 +19,8 @@ pub const SYS_FORK: SyscallNum = 3;
 pub const SYS_EXEC: SyscallNum = 4;
 pub const SYS_GETPID: SyscallNum = 5;
 pub const SYS_UPTIME: SyscallNum = 6;
+pub const SYS_EXIT: SyscallNum = 7;
+pub const SYS_WAIT: SyscallNum = 8;
 
 /// return values
 pub const RET_SUCCESS: SysRet = 0;

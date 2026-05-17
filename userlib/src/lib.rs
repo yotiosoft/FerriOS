@@ -142,3 +142,15 @@ pub fn uptime() -> SysRet {
         syscall(SYS_UPTIME, 0, 0, 0)
     }
 }
+
+pub fn exit() -> SysRet {
+    unsafe {
+        syscall(SYS_EXIT, 0, 0, 0)
+    }
+}
+
+pub fn wait() -> SysRet {
+    unsafe {
+        syscall(SYS_WAIT, 0, 0, 0)
+    }
+}

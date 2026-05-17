@@ -18,6 +18,8 @@ pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64
         abi::SYS_EXEC => sys_exec(arg1 as u64, arg2 as u64),
         abi::SYS_GETPID => sys_getpid(),
         abi::SYS_UPTIME => sys_uptime(),
+        abi::SYS_EXIT => sys_exit(),
+        abi::SYS_WAIT => sys_wait(),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             SysRet::MAX  // エラー
@@ -107,4 +109,22 @@ fn sys_uptime() -> SysRet {
         return abi::RET_ERROR;
     }
     return ticks as SysRet;
+}
+
+/// exit
+fn sys_exit() -> SysRet {
+    thread::uprocess::syscalls::exit();
+    panic!("why exit returns..?");
+    return -1;
+}
+
+/// wait
+fn sys_wait() -> SysRet {
+    if let Ok(pid) = thread::uprocess::syscalls::wait() {
+        if pid > SysRet::MAX as usize {
+            return abi::RET_ERROR;
+        }
+        return pid as SysRet;
+    }
+    return abi::RET_ERROR;
 }
