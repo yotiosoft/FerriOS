@@ -108,3 +108,23 @@ macro_rules! println {
     ($fmt:expr) => ($crate::print!(concat!($fmt, "\n")));
     ($fmt:expr, $($arg:tt)*) => ($crate::print!(concat!($fmt, "\n"), $($arg)*));
 }
+
+/// デバッグメッセージを表示する。
+///
+/// `debug_mode` feature が有効なときだけ出力される。
+#[cfg(feature = "debug_mode")]
+#[macro_export]
+macro_rules! debug {
+    () => ($crate::println!());
+    ($fmt:expr) => ($crate::println!($fmt));
+    ($fmt:expr, $($arg:tt)*) => ($crate::println!($fmt, $($arg)*));
+}
+
+/// デバッグメッセージを無効化する。
+///
+/// `debug_mode` feature が無効なときは、引数の評価も行わない。
+#[cfg(not(feature = "debug_mode"))]
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {};
+}

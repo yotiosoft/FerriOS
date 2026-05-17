@@ -81,7 +81,7 @@ extern "x86-interrupt" fn page_fault_handler(stack_frame: InterruptStackFrame, e
 }
 
 /// タイマ割り込みハンドラ
-extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
@@ -89,16 +89,20 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     // TICKS をカウントアップ
     countup_ticks();
 
-    // CS の下位2ビットが CPL（現在の特権レベル）
-    let cpl = stack_frame.code_segment & 0b11;
-    if cpl == 3 {
-        let cpu = crate::cpu::CPU.lock();
-        println!(
-            "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x}",
-            cpu.current_tid(),
-            cpu.current_pid(),
-            stack_frame.instruction_pointer
-        );
+    #[cfg(feature = "debug_mode")]
+    {
+        // CS の下位2ビットが CPL（現在の特権レベル）
+        let cpl = _stack_frame.code_segment & 0b11;
+
+        if cpl == 3 {
+            let cpu = crate::cpu::CPU.lock();
+            crate::debug!(
+                "Ring 3 confirmed! tid={:?} pid={:?} rip={:#x}",
+                cpu.current_tid(),
+                cpu.current_pid(),
+                _stack_frame.instruction_pointer
+            );
+        }
     }
 
     unsafe {

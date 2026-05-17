@@ -141,6 +141,10 @@ fn main() {
     if is_release {
         args.push("--release".to_string());
     }
+    if std::env::var_os("CARGO_FEATURE_DEBUG_MODE").is_some() {
+        args.push("--features".to_string());
+        args.push("debug_mode".to_string());
+    }
 
     let status = Command::new("cargo")
         .env("USER_APPS_MANIFEST", &apps_manifest)
@@ -176,6 +180,7 @@ fn main() {
     println!("cargo:rerun-if-changed=userlib/src");
     println!("cargo:rerun-if-changed=userlib/Cargo.toml");
     println!("cargo:rerun-if-changed=x86_64-ferrios.json");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEBUG_MODE");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let bios_path = out_dir.join("bios.img");

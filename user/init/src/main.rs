@@ -21,6 +21,7 @@ pub extern "C" fn main() -> ! {
     // on the parent process
     //let pid = getpid();
 
+    print_fmt!("[parent] waiting child process...");
     let pid = wait();
     print_fmt!("[parent] wait returns {}", pid);
 
