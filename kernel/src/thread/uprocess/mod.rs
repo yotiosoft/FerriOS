@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 use spin::Mutex;
-use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
+use x86_64::{ VirtAddr, registers::control::Cr3, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
 use lazy_static::lazy_static;
 use abi::ProcessID;
 
@@ -211,21 +211,6 @@ fn add_to_process_table(process: Process) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// プロセスを Process Table から削除
-fn remove_from_process_table(pid: ProcessID) -> Result<(), &'static str> {
-    let mut process_table = PROCESS_TABLE.lock();
-
-    if let Some(i) = process_table
-        .iter()
-        .position(|p| p.as_ref().is_some_and(|p| p.pid == pid))
-    {
-        process_table[i] = None;
-        Ok(())
-    } else {
-        Err("no such pid in the process table")
-    }
-}
-
 /// プロセス内の全スレッドを Runnable としてマークする
 fn mark_threads_as_runnable(process: Process) -> Result<(), &'static str> {
     let mut thread_table = THREAD_TABLE.lock();
@@ -270,10 +255,21 @@ fn free_process(process: &mut Process) -> Result<(), &'static str> {
         }
     }
 
-    // ToDo: 現在の BootInfoFrameAllocator はフレームの返却を実装していないため、
-    // 現時点で安全にできるのは PCB からページテーブル参照を外すところまで。
-    // 将来 FrameDeallocator を導入したら、ここでユーザページと中間ページテーブルを辿って返却する。
+    if let Some(page_table) = process.page_table {
+        // 現在の CR3 active なページでないことを確認
+        let (current_page_table, _) = Cr3::read();
+        if current_page_table == page_table {
+            return Err("cannot free cr3 active page table");
+        }
 
-    // Process Table から削除
-    remove_from_process_table(process.pid)
+        // free_uvm
+        process.page_table = None;
+        let mut frame_allocator_guard = memory::FRAME_ALLOCATOR.lock();
+        let frame_allocator = frame_allocator_guard
+            .as_mut()
+            .ok_or("FRAME_ALLOCATOR not initialized")?;
+        memory::umem::free_uvm(page_table, frame_allocator)?;
+    }
+
+    Ok(())
 }

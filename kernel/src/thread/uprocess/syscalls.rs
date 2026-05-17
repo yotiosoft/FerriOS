@@ -5,7 +5,6 @@ use crate::thread;
 use crate::thread::ThreadState;
 use crate::thread::uprocess::PROCESS_TABLE;
 use crate::thread::uprocess::ProcessState;
-use crate::thread::uprocess::remove_from_process_table;
 use x86_64::structures::paging::PageTable;
 use abi::{ ProcessID, ThreadID };
 
@@ -146,24 +145,42 @@ pub fn exit() -> Result<(), &'static str> {
 }
 
 pub fn wait() -> Result<(), &'static str> {
-    let mut process_table = PROCESS_TABLE.lock();
     let pid = cpu::CPU.lock().current_pid().expect("no pid");
 
     loop {
-        let mut havekids = 0;
+        let (mut zombie_child, havekids) = {
+            let mut process_table = PROCESS_TABLE.lock();
+            let mut zombie_child = None;
+            let mut havekids = false;
 
-        for i in 0..super::NPROCESS-1 {
-            if let Some(child) = &mut process_table[i] {
-                if let Some(ppid) = child.ppid {
-                    if ppid != pid {
-                        continue;
-                    }
+            for i in 0..super::NPROCESS-1 {
+                let is_child = process_table[i]
+                    .as_ref()
+                    .is_some_and(|child| child.ppid == Some(pid));
+                if !is_child {
+                    continue;
                 }
 
-                if child.state == ProcessState::Zombie {
-                    super::free_process(child);
+                havekids = true;
+                let is_zombie = process_table[i]
+                    .as_ref()
+                    .is_some_and(|child| child.state == ProcessState::Zombie);
+                if is_zombie {
+                    zombie_child = process_table[i].take();
+                    break;
                 }
             }
+
+            (zombie_child, havekids)
+        };
+
+        if let Some(child) = zombie_child.as_mut() {
+            super::free_process(child)?;
+            return Ok(());
+        }
+
+        if !havekids {
+            return Err("no child process");
         }
     }
 }
