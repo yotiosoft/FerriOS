@@ -23,19 +23,31 @@ pub const NPROCESS: usize = 16;
 /// 1プロセスあたりの最大スレッド数
 pub const NTHREAD_PER_PROCESS: usize = 8;
 
+/// Process State
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessState {
+    Unused,
+    Alive,
+    Zombie,
+}
+
 /// Process Control Block (PCB)
 #[derive(Debug, Clone, Copy)]
 pub struct Process {
-    pub pid: ProcessID,
-    pub threads: [Option<usize>; NTHREAD_PER_PROCESS],
-    pub nthread: usize,
-    pub page_table: Option<PhysFrame>,
+    pub pid: ProcessID,                                     // Process ID
+    pub ppid: Option<ProcessID>,                            // Parent Process ID
+    pub state: ProcessState,                                // Process State
+    pub threads: [Option<usize>; NTHREAD_PER_PROCESS],      // Threads the process owns
+    pub nthread: usize,                                     // Threads count
+    pub page_table: Option<PhysFrame>,                      // Page Table of this process
 }
 
 impl Process {
     pub const fn new() -> Self {
         Process {
             pid: 0,
+            ppid: None,
+            state: ProcessState::Unused,
             threads: [None; NTHREAD_PER_PROCESS],
             nthread: 0,
             page_table: None,
@@ -158,6 +170,8 @@ fn alloc_proc() -> Result<Process, &'static str> {
     // プロセス構造体
     let mut process = Process {
         pid: pid,
+        ppid: None,
+        state: ProcessState::Alive,
         threads: [None; 8],
         nthread: 0,
         page_table: None,
@@ -226,4 +240,40 @@ fn mark_threads_as_runnable(process: Process) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+/// プロセスを解放する
+fn free_process(process: &mut Process) -> Result<(), &'static str> {
+    {
+        let mut thread_table = THREAD_TABLE.lock();
+        for tid in process.threads.into_iter().flatten() {
+            if tid >= super::NTHREAD {
+                return Err("tid >= NTHREAD");
+            }
+
+            let thread = &mut thread_table[tid];
+            if thread.pid != Some(process.pid) {
+                return Err("thread does not belong to process");
+            }
+
+            if thread.kstack != 0 {
+                let layout = alloc::alloc::Layout::from_size_align(memory::STACK_SIZE, 16)
+                    .map_err(|_| "invalid kernel stack layout")?;
+                let kstack_base = (thread.kstack - memory::STACK_SIZE as u64) as *mut u8;
+                unsafe {
+                    alloc::alloc::dealloc(kstack_base, layout);
+                }
+            }
+
+            // TrapFrame はカーネルスタック上にあるので、スタック解放後に参照を残さない
+            *thread = super::Thread::new();
+        }
+    }
+
+    // ToDo: 現在の BootInfoFrameAllocator はフレームの返却を実装していないため、
+    // 現時点で安全にできるのは PCB からページテーブル参照を外すところまで。
+    // 将来 FrameDeallocator を導入したら、ここでユーザページと中間ページテーブルを辿って返却する。
+
+    // Process Table から削除
+    remove_from_process_table(process.pid)
 }

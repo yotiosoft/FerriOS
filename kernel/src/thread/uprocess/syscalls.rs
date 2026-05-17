@@ -4,6 +4,7 @@ use crate::scheduler::yield_from_context;
 use crate::thread;
 use crate::thread::ThreadState;
 use crate::thread::uprocess::PROCESS_TABLE;
+use crate::thread::uprocess::ProcessState;
 use crate::thread::uprocess::remove_from_process_table;
 use x86_64::structures::paging::PageTable;
 use abi::{ ProcessID, ThreadID };
@@ -38,6 +39,12 @@ pub fn fork() -> Result<ProcessID, &'static str> {
 
     // ページテーブル設定
     process.page_table = Some(page_table);
+
+    // ppid (parent pid) を設定
+    {
+        let cpu = crate::cpu::CPU.lock();
+        process.ppid = cpu.current_pid();
+    }
 
     // 親プロセスの trapframe とユーザ復帰情報をコピー
     let (parent_tf, parent_user_rsp): (thread::trapframe::TrapFrame, u64) = {
@@ -101,19 +108,33 @@ pub fn getpid() -> Result<ProcessID, &'static str> {
 
 pub fn exit() -> Result<(), &'static str> {
     let cpu = cpu::CPU.lock();
-    let mut thread = cpu.current_thread().ok_or("no thread")?;
-    if thread.tid == INIT_TID {
+    let mut process = cpu.current_process().ok_or("no process")?;
+    if process.pid == INIT_PID {
         return Err("init exiting");
     }
 
-    // ToDo: このスレッドが開いている全てのファイルを close する
+    // ToDo: このプロセスが開いている全てのファイルを close する
 
-    // ToDo: このスレッドを wait している親プロセスを wakeup させる
+    // ToDo: このプロセスを wait している親プロセスを wakeup させる
 
-    // ToDo: このスレッドの子スレッドを init thread の子スレッドに変更する
+    // ToDo: このプロセスの子プロセスを init thread の子プロセスに変更する
 
-    // スレッドを ZOMBIE 状態に変更する
-    thread.state = ThreadState::Zombie;
+    // プロセスを ZOMBIE 状態に変更する
+    process.state = super::ProcessState::Zombie;
+
+    // プロセスに属するスレッドを ZOMBIE 状態にする
+    {
+        let mut thread_table = super::THREAD_TABLE.lock();
+        for tid in process.threads {
+            if let Some(tid) = tid {
+                if let Some(pid) = thread_table[tid].pid {
+                    if pid == process.pid {
+                        thread_table[tid].state = ThreadState::Zombie;
+                    }
+                }
+            }
+        }
+    }
 
     // スケジューラに移行する
     // このシステムコールが return することはない（コンパイルを通すため Ok(()) を返してるけど…）
@@ -126,13 +147,22 @@ pub fn exit() -> Result<(), &'static str> {
 
 pub fn wait() -> Result<(), &'static str> {
     let mut process_table = PROCESS_TABLE.lock();
+    let pid = cpu::CPU.lock().current_pid().expect("no pid");
 
     loop {
         let mut havekids = 0;
 
         for i in 0..super::NPROCESS-1 {
-            if let Some(process) = &mut process_table[i] {
-                process.pid = 1;
+            if let Some(child) = &mut process_table[i] {
+                if let Some(ppid) = child.ppid {
+                    if ppid != pid {
+                        continue;
+                    }
+                }
+
+                if child.state == ProcessState::Zombie {
+                    super::free_process(child);
+                }
             }
         }
     }
