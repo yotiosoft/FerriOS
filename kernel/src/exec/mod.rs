@@ -176,7 +176,7 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
         if program_header.prog_type != ELF_PROG_LOAD {
             continue;
         }
-        crate::println!(
+        crate::debug!(
             "[exec] LOAD vaddr={:#x}, filesz={:#x}, memsz={:#x}, flags={:#x}",
             program_header.vaddr,
             program_header.filesz,

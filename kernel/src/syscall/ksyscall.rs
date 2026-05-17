@@ -41,7 +41,7 @@ pub extern "C" fn set_trapframe(tf_ptr: *mut thread::trapframe::TrapFrame) {
 
 /// 数値を表示する
 fn sys_print_num(n: i64) -> SysRet {
-    crate::println!("[syscall] print_num: {}", n);
+    crate::println!("{}", n);
     abi::RET_SUCCESS
 }
 
@@ -54,12 +54,12 @@ fn sys_print_str(ptr: u64, len: i64) -> SysRet {
     let bytes = match super::copy_bytes_from_user(ptr, len as usize) {
         Ok(bytes) => bytes,
         Err(e) => {
-            crate::println!("[syscall] print_str copy error: {}", e);
+            crate::println!("print_str copy error: {}", e);
             return SysRet::MAX;
         }
     };
     if let Ok(s) = core::str::from_utf8(&bytes) {
-        crate::println!("[syscall] print_str: {}", s);
+        crate::println!("{}", s);
         abi::RET_SUCCESS
     } else {
         SysRet::MAX

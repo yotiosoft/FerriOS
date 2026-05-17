@@ -14,7 +14,7 @@ use ferrios::task::serial_input;
 use core::panic::PanicInfo;
 use alloc::{ boxed::Box, vec, vec::Vec, rc::Rc };
 
-use ferrios::{ println, print };
+use ferrios::{ println, print, debug };
 use ferrios::memory;
 use ferrios::allocator;
 use ferrios::task::{ Task, executor::Executor };
@@ -51,14 +51,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let console_mode = console::CONSOLE.lock().get();
     println!("console-mode: {:?}", console_mode);
 
-    println!("initializing memory..");
+    print!("initializing memory.. ");
+    debug!();
     let phys_mem_offset = VirtAddr::new(
         boot_info.physical_memory_offset.into_option().unwrap()
     );
     let mut mapper = unsafe { memory::init(phys_mem_offset, &boot_info.memory_regions) };
 
     // allocator 初期化
-    println!("initializing heap memory..");
+    print!("initializing heap memory.. ");
+    debug!();
     {
         let mut guard = memory::FRAME_ALLOCATOR.lock();
         let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
@@ -67,25 +69,25 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // allocates
     let x = Box::new(41);
-    println!("\theap_value at {:p}", x);
+    debug!("\theap_value at {:p}", x);
     let mut vec = Vec::new();
     for i in 0..500 {
         vec.push(i);
     }
-    println!("\tvec at {:p}", vec.as_slice());
+    debug!("\tvec at {:p}", vec.as_slice());
     // 参照されたベクタを作成する → カウントが0になると解放される
     let reference_counted = Rc::new(vec![1, 2, 3]);
     let cloned_reference = reference_counted.clone();
-    println!("\tcurrent reference count is {}", Rc::strong_count(&cloned_reference));
+    debug!("\tcurrent reference count is {}", Rc::strong_count(&cloned_reference));
     core::mem::drop(reference_counted);
-    println!("\treference count is {} now", Rc::strong_count(&cloned_reference));
+    debug!("\treference count is {} now", Rc::strong_count(&cloned_reference));
     println!("done.");
 
     #[cfg(test)]
     test_main();
     
     // カーネルスレッド作成
-    print!("Starting kernel threads..");
+    print!("Starting kernel threads.. ");
     //thread::kthread::create_kernel_thread(kernel_thread_0);
     //thread::kthread::create_kernel_thread(kernel_thread_1);
     thread::kthread::create_kernel_thread(keyboard_and_serial_input_thread);
@@ -94,7 +96,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ユーザプロセス作成
     thread::uprocess::create_user_process_from_path("/init").expect("failed to create user process");
 
-    println!("Starting the scheduler..");
+    println!("");
+    debug!("Starting the scheduler..");
     scheduler::scheduler();
 }
 

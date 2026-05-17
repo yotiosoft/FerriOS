@@ -71,7 +71,7 @@ pub fn fork() -> Result<ProcessID, &'static str> {
         child.context.user_rdi = parent_tf.rdi;
         child.context.user_rsi = parent_tf.rsi;
         
-        crate::println!(
+        crate::debug!(
             "[fork] child pid={}, tid={}, user_rip={:#x}, rsp3={:#x}, rax={:#x}",
             process.pid,
             child_tid,

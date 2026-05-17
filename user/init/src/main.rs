@@ -23,7 +23,7 @@ pub extern "C" fn main() -> ! {
 
     print_fmt!("[parent] waiting child process...");
     let pid = wait();
-    print_fmt!("[parent] wait returns {}", pid);
+    print_fmt!("[parent] child process has exited; child's pid is {}", pid);
 
     loop {
         //print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
