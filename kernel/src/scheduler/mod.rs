@@ -36,7 +36,7 @@ pub fn yield_from_context() {
 /// syscall 処理中のユーザスレッドからスケジューラへ戻る
 ///
 /// syscall entry は `swapgs` 済みなので、通常の yield と違って
-/// scheduler / 次の user context に渡る前後で GS の向きを戻す必要がある。
+/// scheduler / 次の user context に渡る前後で GS の向きを戻す必要がある
 pub fn yield_from_syscall_context() {
     get_scheduler().on_syscall_yield();
 }
