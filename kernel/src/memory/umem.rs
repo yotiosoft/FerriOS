@@ -1,6 +1,7 @@
-use super::{ FrameAllocator, Size4KiB,PhysFrame, PageTable, OffsetPageTable, PHYSICAL_MEMORY_OFFSET, PAGETABLE_USER_SPACE_START, PAGETABLE_USER_SPACE_END, PageTableFlags, va };
+use super::{ FrameAllocator, FrameDeallocator, Size4KiB,PhysFrame, PageTable, OffsetPageTable, PHYSICAL_MEMORY_OFFSET, PAGETABLE_USER_SPACE_START, PAGETABLE_USER_SPACE_END, PageTableFlags, va };
 use super::kmem;
 use super::thread;
+use x86_64::structures::paging::page_table::FrameError;
 
 /// ユーザプロセスのページテーブルに切り替え
 pub unsafe fn switch_to_user_page_table(thread: &thread::Thread) {
@@ -150,4 +151,95 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
     }
 
     Ok((child_offset_table, child_pml4_frame))
+}
+
+/// ユーザ空間のページテーブル階層と、それが参照する leaf frame を解放する
+///
+/// # Safety contract
+/// 呼び出し元は `pml4_frame` が現在使用中の CR3 ではなく、このページテーブル階層が
+/// どこからも参照されていないことが保証されている必要あり
+pub fn free_uvm(
+    pml4_frame: PhysFrame,
+    frame_deallocator: &mut impl FrameDeallocator<Size4KiB>,
+) -> Result<(), &'static str> {
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("physical memory offset not initialized");
+    let pml4 = unsafe {
+        va::table_from_frame(pml4_frame, physical_memory_offset)
+    };
+
+    for pml4_idx in PAGETABLE_USER_SPACE_START..PAGETABLE_USER_SPACE_END {
+        if !pml4[pml4_idx].flags().contains(PageTableFlags::PRESENT) {
+            continue;
+        }
+
+        let pdpt_frame = frame_from_entry(&pml4[pml4_idx])?;
+        let pdpt = unsafe {
+            va::table_from_frame(pdpt_frame, physical_memory_offset)
+        };
+
+        for pdpt_idx in 0..512usize {
+            if !pdpt[pdpt_idx].flags().contains(PageTableFlags::PRESENT) {
+                continue;
+            }
+
+            let pd_frame = frame_from_entry(&pdpt[pdpt_idx])?;
+            let pd = unsafe {
+                va::table_from_frame(pd_frame, physical_memory_offset)
+            };
+
+            for pd_idx in 0..512usize {
+                if !pd[pd_idx].flags().contains(PageTableFlags::PRESENT) {
+                    continue;
+                }
+
+                let pt_frame = frame_from_entry(&pd[pd_idx])?;
+                let pt = unsafe {
+                    va::table_from_frame(pt_frame, physical_memory_offset)
+                };
+
+                for pt_idx in 0..512usize {
+                    if !pt[pt_idx].flags().contains(PageTableFlags::PRESENT) {
+                        continue;
+                    }
+
+                    let leaf_frame = frame_from_entry(&pt[pt_idx])?;
+                    unsafe {
+                        frame_deallocator.deallocate_frame(leaf_frame);
+                    }
+                    pt[pt_idx].set_unused();
+                }
+
+                unsafe {
+                    frame_deallocator.deallocate_frame(pt_frame);
+                }
+                pd[pd_idx].set_unused();
+            }
+
+            unsafe {
+                frame_deallocator.deallocate_frame(pd_frame);
+            }
+            pdpt[pdpt_idx].set_unused();
+        }
+
+        unsafe {
+            frame_deallocator.deallocate_frame(pdpt_frame);
+        }
+        pml4[pml4_idx].set_unused();
+    }
+
+    unsafe {
+        frame_deallocator.deallocate_frame(pml4_frame);
+    }
+
+    Ok(())
+}
+
+fn frame_from_entry(entry: &x86_64::structures::paging::page_table::PageTableEntry) -> Result<PhysFrame, &'static str> {
+    match entry.frame() {
+        Ok(frame) => Ok(frame),
+        Err(FrameError::HugeFrame) => Err("huge pages not supported"),
+        Err(FrameError::FrameNotPresent) => Err("page table entry not present"),
+    }
 }
