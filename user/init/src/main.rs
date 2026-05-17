@@ -19,9 +19,13 @@ pub extern "C" fn main() -> ! {
     }
 
     // on the parent process
-    let pid = getpid();
+    //let pid = getpid();
+
+    let pid = wait();
+    print_fmt!("[parent] wait returns {}", pid);
+
     loop {
-        print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
+        //print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
     }
 }
 

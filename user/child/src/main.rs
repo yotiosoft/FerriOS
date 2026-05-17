@@ -7,9 +7,11 @@ use userlib::*;
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> ! {
     let pid = getpid();
-    loop {
+    for _ in 0..10 {
         print_fmt!("[child] pid = {} ticks = {}", pid, uptime());
     }
+
+    exit()
 }
 
 #[panic_handler]

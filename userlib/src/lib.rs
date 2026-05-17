@@ -143,10 +143,11 @@ pub fn uptime() -> SysRet {
     }
 }
 
-pub fn exit() -> SysRet {
+pub fn exit() -> ! {
     unsafe {
-        syscall(SYS_EXIT, 0, 0, 0)
+        syscall(SYS_EXIT, 0, 0, 0);
     }
+    panic!("exit returns!");
 }
 
 pub fn wait() -> SysRet {

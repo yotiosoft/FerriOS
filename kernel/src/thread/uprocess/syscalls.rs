@@ -1,6 +1,6 @@
 use crate::memory;
 use crate::cpu;
-use crate::scheduler::yield_from_context;
+use crate::scheduler::yield_from_syscall_context;
 use crate::thread;
 use crate::thread::ThreadState;
 use crate::thread::uprocess::PROCESS_TABLE;
@@ -106,9 +106,8 @@ pub fn getpid() -> Result<ProcessID, &'static str> {
 }
 
 pub fn exit() -> Result<(), &'static str> {
-    let cpu = cpu::CPU.lock();
-    let mut process = cpu.current_process().ok_or("no process")?;
-    if process.pid == INIT_PID {
+    let pid = cpu::CPU.lock().current_pid().ok_or("no process")?;
+    if pid == INIT_PID {
         return Err("init exiting");
     }
 
@@ -118,8 +117,13 @@ pub fn exit() -> Result<(), &'static str> {
 
     // ToDo: このプロセスの子プロセスを init thread の子プロセスに変更する
 
-    // プロセスを ZOMBIE 状態に変更する
-    process.state = super::ProcessState::Zombie;
+    // Process Table 上の実体を ZOMBIE 状態に変更する
+    let process = {
+        let mut process_table = PROCESS_TABLE.lock();
+        let process = process_table[pid].as_mut().ok_or("no process")?;
+        process.state = super::ProcessState::Zombie;
+        *process
+    };
 
     // プロセスに属するスレッドを ZOMBIE 状態にする
     {
@@ -137,7 +141,7 @@ pub fn exit() -> Result<(), &'static str> {
 
     // スケジューラに移行する
     // このシステムコールが return することはない（コンパイルを通すため Ok(()) を返してるけど…）
-    yield_from_context();
+    yield_from_syscall_context();
 
     panic!("zonbie exit");
 
@@ -182,5 +186,7 @@ pub fn wait() -> Result<ProcessID, &'static str> {
         if !havekids {
             return Err("no child process");
         }
+
+        yield_from_syscall_context();
     }
 }

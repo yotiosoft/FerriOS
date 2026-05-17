@@ -16,6 +16,7 @@ pub fn init(scheduler: Box<dyn Scheduler + Send + Sync>) {
 pub trait Scheduler: Send + Sync {
     fn scheduler(&self) -> !;
     fn on_yield(&self);
+    fn on_syscall_yield(&self);
 }
 
 fn get_scheduler() -> &'static dyn Scheduler {
@@ -30,4 +31,12 @@ pub fn scheduler() -> ! {
 
 pub fn yield_from_context() {
     get_scheduler().on_yield();
+}
+
+/// syscall 処理中のユーザスレッドからスケジューラへ戻る
+///
+/// syscall entry は `swapgs` 済みなので、通常の yield と違って
+/// scheduler / 次の user context に渡る前後で GS の向きを戻す必要がある。
+pub fn yield_from_syscall_context() {
+    get_scheduler().on_syscall_yield();
 }
