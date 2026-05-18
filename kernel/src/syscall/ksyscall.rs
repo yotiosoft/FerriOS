@@ -18,8 +18,8 @@ pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64
         abi::SYS_EXEC => sys_exec(arg1 as u64, arg2 as u64),
         abi::SYS_GETPID => sys_getpid(),
         abi::SYS_UPTIME => sys_uptime(),
-        abi::SYS_EXIT => sys_exit(),
-        abi::SYS_WAIT => sys_wait(),
+        abi::SYS_EXIT => sys_exit(arg1 as RetValue),
+        abi::SYS_WAIT => sys_wait(arg1 as UserAddress),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             SysRet::MAX  // エラー
@@ -46,7 +46,7 @@ fn sys_print_num(n: i64) -> SysRet {
 }
 
 /// 文字列を表示する（ポインタ + 長さ）
-fn sys_print_str(ptr: u64, len: i64) -> SysRet {
+fn sys_print_str(ptr: abi::UserAddress, len: i64) -> SysRet {
     // ユーザポインタの検証（今は簡易版）
     if len > 256 {
         return SysRet::MAX;
@@ -78,7 +78,7 @@ fn sys_fork() -> SysRet {
 }
 
 /// exec
-fn sys_exec(path_ptr: u64, argv_ptr: u64) -> SysRet {
+fn sys_exec(path_ptr: abi::UserAddress, argv_ptr: abi::UserAddress) -> SysRet {
     let path = super::copy_cstr_from_user(path_ptr, super::MAX_ARG_LEN).expect("exec: failed to copy_cstr_from_user");
     let path = core::str::from_utf8(&path).expect("exec: path is not valid UTF-8");
     let argv = super::copy_argv(argv_ptr).expect("exec: failed to copy argv");
@@ -112,18 +112,26 @@ fn sys_uptime() -> SysRet {
 }
 
 /// exit
-fn sys_exit() -> SysRet {
-    thread::uprocess::syscalls::exit();
+fn sys_exit(ret_value: abi::RetValue) -> SysRet {
+    thread::uprocess::syscalls::exit(ret_value);
     panic!("why exit returns..?");
     return -1;
 }
 
 /// wait
-fn sys_wait() -> SysRet {
-    if let Ok(pid) = thread::uprocess::syscalls::wait() {
+fn sys_wait(status_ptr: abi::UserAddress) -> SysRet {
+    if let Ok((pid, exit_status)) = thread::uprocess::syscalls::wait() {
         if pid > SysRet::MAX as usize {
             return abi::RET_ERROR;
         }
+
+        if status_ptr != abi::NULL_POINTER {
+            let bytes = exit_status.to_ne_bytes();
+            if super::copy_to_user(status_ptr, &bytes).is_err() {
+                return abi::RET_ERROR;
+            }
+        }
+
         return pid as SysRet;
     }
     return abi::RET_ERROR;

@@ -40,6 +40,7 @@ pub struct Process {
     pub threads: [Option<usize>; NTHREAD_PER_PROCESS],      // Threads the process owns
     pub nthread: usize,                                     // Threads count
     pub page_table: Option<PhysFrame>,                      // Page Table of this process
+    pub exit_status: abi::RetValue,                         // Exit return value
 }
 
 impl Process {
@@ -51,6 +52,7 @@ impl Process {
             threads: [None; NTHREAD_PER_PROCESS],
             nthread: 0,
             page_table: None,
+            exit_status: abi::RET_SUCCESS,
         }
     }
 
@@ -175,6 +177,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
         threads: [None; 8],
         nthread: 0,
         page_table: None,
+        exit_status: abi::RET_SUCCESS,
     };
 
     // 1st thread を追加

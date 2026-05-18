@@ -143,15 +143,20 @@ pub fn uptime() -> SysRet {
     }
 }
 
-pub fn exit() -> ! {
+pub fn exit(ret_value: abi::RetValue) -> ! {
     unsafe {
-        syscall(SYS_EXIT, 0, 0, 0);
+        syscall(SYS_EXIT, ret_value, 0, 0);
     }
     panic!("exit returns!");
 }
 
-pub fn wait() -> SysRet {
+pub fn wait(status_ptr: Option<&mut abi::RetValue>) -> SysRet {
+    let status_ptr = match status_ptr {
+        Some(p) => p as *mut abi::RetValue as i64,
+        None => 0,
+    };
+
     unsafe {
-        syscall(SYS_WAIT, 0, 0, 0)
+        syscall(SYS_WAIT, status_ptr, 0, 0)
     }
 }

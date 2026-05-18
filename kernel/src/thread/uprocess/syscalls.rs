@@ -5,6 +5,7 @@ use crate::thread;
 use crate::thread::ThreadState;
 use crate::thread::uprocess::PROCESS_TABLE;
 use crate::thread::uprocess::ProcessState;
+use abi::RetValue;
 use x86_64::structures::paging::PageTable;
 use abi::{ ProcessID, ThreadID };
 
@@ -105,7 +106,7 @@ pub fn getpid() -> Result<ProcessID, &'static str> {
     }
 }
 
-pub fn exit() -> Result<(), &'static str> {
+pub fn exit(ret_value: abi::RetValue) -> Result<(), &'static str> {
     let pid = cpu::CPU.lock().current_pid().ok_or("no process")?;
     if pid == INIT_PID {
         return Err("init exiting");
@@ -117,11 +118,16 @@ pub fn exit() -> Result<(), &'static str> {
 
     // ToDo: このプロセスの子プロセスを init thread の子プロセスに変更する
 
-    // Process Table 上の実体を ZOMBIE 状態に変更する
-    let process = {
+    let mut process = {
         let mut process_table = PROCESS_TABLE.lock();
         let process = process_table[pid].as_mut().ok_or("no process")?;
+
+        // Process Table 上の実体を ZOMBIE 状態に変更する
         process.state = super::ProcessState::Zombie;
+
+        // Exit return value のセット
+        process.exit_status = ret_value;
+
         *process
     };
 
@@ -148,10 +154,11 @@ pub fn exit() -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn wait() -> Result<ProcessID, &'static str> {
+pub fn wait() -> Result<(ProcessID, abi::RetValue), &'static str> {
     let pid = cpu::CPU.lock().current_pid().expect("no pid");
 
     loop {
+        // ZONBIE 状態に子プロセスを探索
         let (mut zombie_child, havekids) = {
             let mut process_table = PROCESS_TABLE.lock();
             let mut zombie_child = None;
@@ -178,9 +185,12 @@ pub fn wait() -> Result<ProcessID, &'static str> {
             (zombie_child, havekids)
         };
 
+        // ZOMBIE 状態の子プロセスがあった場合
         if let Some(child) = zombie_child.as_mut() {
+            // free process
             super::free_process(child)?;
-            return Ok(child.pid);
+
+            return Ok((child.pid, child.exit_status));
         }
 
         if !havekids {

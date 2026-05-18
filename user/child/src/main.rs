@@ -5,13 +5,14 @@ use core::panic::PanicInfo;
 use userlib::*;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn main() -> ! {
+pub extern "C" fn main() {
     let pid = getpid();
-    for _ in 0..10 {
+    for _ in 0..60 {
         print_fmt!("[child] pid = {} ticks = {}", pid, uptime());
     }
+    print_fmt!("[child] exiting..");
 
-    exit()
+    exit(123456);
 }
 
 #[panic_handler]

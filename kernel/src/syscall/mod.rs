@@ -213,3 +213,83 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
 
     Ok(bytes)
 }
+
+
+/// kernel から user にバイナリをコピー
+fn copy_to_user(ptr: abi::UserAddress, bytes: &[u8]) -> Result<(), &'static str> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    if ptr == 0 {
+        return Err("syscall: null pointer");
+    }
+
+    let process_page_table = {
+        let cpu = crate::cpu::CPU.lock();
+        cpu.current_process()
+            .ok_or("syscall: process not found")?
+            .page_table
+            .ok_or("syscall: no page table")?
+    };
+
+    let physical_memory_offset = crate::memory::PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("physical memory offset not initialized");
+    let pml4 = unsafe {
+        &mut *(crate::memory::va::phys_to_virt(process_page_table.start_address(), physical_memory_offset)
+            .as_mut_ptr::<x86_64::structures::paging::PageTable>())
+    };
+
+    let mut guard = crate::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = guard
+        .as_mut()
+        .expect("FRAME_ALLOCATOR not initialized");
+
+    let mut copied = 0usize;
+    while copied < bytes.len() {
+        let va = VirtAddr::new(ptr + copied as u64);
+        let page_offset = usize::from(va.page_offset());
+        let to_copy = cmp::min(crate::memory::PAGE_SIZE - page_offset, bytes.len() - copied);
+        let pte = unsafe {
+            crate::memory::va::walk_pagetable(
+                pml4,
+                va,
+                false,
+                physical_memory_offset,
+                frame_allocator,
+            )
+        }
+        .ok_or_else(|| {
+            crate::println!("[syscall] unmapped va={:#x}", va.as_u64());
+            "syscall: address is not mapped"
+        })?;
+
+        let flags = pte.flags();
+        if !flags.contains(x86_64::structures::paging::PageTableFlags::PRESENT) {
+            return Err("syscall: address is not present");
+        }
+        if !flags.contains(x86_64::structures::paging::PageTableFlags::USER_ACCESSIBLE) {
+            return Err("syscall: address is not user-accessible");
+        }
+        if !flags.contains(x86_64::structures::paging::PageTableFlags::WRITABLE) {
+            return Err("syscall: address is not writable");
+        }
+
+        let page_va = unsafe {
+            crate::memory::va::phys_to_virt(
+                x86_64::PhysAddr::new(pte.addr().as_u64()),
+                physical_memory_offset,
+            )
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                bytes[copied..copied + to_copy].as_ptr(),
+                page_va.as_mut_ptr::<u8>().add(page_offset),
+                to_copy,
+            );
+        }
+        copied += to_copy;
+    }
+
+    Ok(())
+}
