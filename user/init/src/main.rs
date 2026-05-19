@@ -1,11 +1,11 @@
 #![no_std]
 #![no_main]
 
-use core::panic::PanicInfo;
 use userlib::*;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn main() -> ! {
+userlib::entry!(main);
+
+fn main() {
     let ret = fork();
     if ret == RET_ERROR {
         panic!("failed to call fork()");
@@ -29,9 +29,4 @@ pub extern "C" fn main() -> ! {
     loop {
         //print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
     }
-}
-
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
 }
