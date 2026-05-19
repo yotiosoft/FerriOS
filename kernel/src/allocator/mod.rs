@@ -14,7 +14,7 @@ pub mod fixed_size_block;
 static ALLOCATOR: lock::Locked<FixedSizeBlockAllocator> = lock::Locked::new(FixedSizeBlockAllocator::new());
 
 pub const HEAP_START: usize = 0x_FFFF_8888_0000_0000;
-pub const HEAP_SIZE: usize = 100 * 1024;        // 100 KiB
+pub const HEAP_SIZE: usize = 1024 * 1024;        // 1MB
 
 pub fn init_heap(mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), MapToError<Size4KiB>> {
     let page_range = {

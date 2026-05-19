@@ -1,0 +1,215 @@
+use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, SFMask};
+use x86_64::VirtAddr;
+use core::arch::naked_asm;
+use core::cmp;
+use core::mem::offset_of;
+use alloc::vec::Vec;
+
+use crate::gdt;
+use crate::cpu::Cpu;
+
+mod ksyscall;
+
+const OFFSET_SAVED_USER_RSP: usize = offset_of!(Cpu, saved_user_rsp);
+const OFFSET_KERNEL_SYSCALL_RSP: usize = offset_of!(Cpu, kernel_syscall_rsp);
+const OFFSET_SAVED_RAX: usize = 72;
+
+pub fn init() -> Result<(), &'static str> {
+    unsafe {
+        Efer::update(|flags| *flags |= EferFlags::SYSTEM_CALL_EXTENSIONS);
+    }
+
+    // syscall handler のアドレスを LSTAR に登録
+    LStar::write(VirtAddr::new(syscall_entry as u64));
+
+    // CC/SS セグメントを STAR に設定
+    Star::write(
+        gdt::GDT.1.user_code_selector,
+        gdt::GDT.1.user_data_selector,
+        gdt::GDT.1.kernel_code_selector,
+        gdt::GDT.1.kernel_data_selector,
+    )?;
+
+    // syscall 呼び出し時に IF をクリアさせる
+    SFMask::write(x86_64::registers::rflags::RFlags::INTERRUPT_FLAG);
+
+    Ok(())
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn syscall_entry() {
+    naked_asm!(
+        // カーネル用 GS に切り替え
+        "swapgs",
+
+        // ユーザ RSP を退避し、カーネルスタックに切り替え
+        "mov gs:[{saved_user_rsp}], rsp",
+        "mov rsp, gs:[{kernel_syscall_rsp}]",
+
+        // レジスタを退避
+        "push rcx",   // sysretq 用 RIP
+        "push r11",   // sysretq 用 RFLAGS
+        "push rax",   // syscall 番号
+        "push rdi",
+        "push rsi",
+        "push rdx",
+        "push rbx",
+        "push rbp",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+
+        // syscall_dispatch(number=rax, arg0=rdi, arg1=rsi, arg2=rdx)
+        // 引数は rdi, rsi, rdx に入っている
+        "mov r10, rax",
+        "mov r8,  rsp",
+        "mov rcx, rdx",
+        "mov rdx, rsi",
+        "mov rsi, rdi",
+        "mov rdi, r10",
+        // rsi, rdx はユーザが設定した値がそのまま残っている
+        "call {syscall_dispatch}",
+        // syscall_dispatch の戻り値を保存済み rax スロットへ反映する
+        "mov [rsp + {saved_rax_offset}], rax",
+
+        // レジスタを復元
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop rbp",
+        "pop rbx",
+        "pop rdx",
+        "pop rsi",
+        "pop rdi",
+        "pop rax",
+        "pop r11",
+        "pop rcx",
+
+        // ユーザ RSP を復元
+        "mov rsp, gs:[{saved_user_rsp}]",
+
+        // ユーザ用 GS に戻す
+        "swapgs",
+
+        // ユーザモードに戻る
+        "sysretq",
+
+        saved_user_rsp     = const OFFSET_SAVED_USER_RSP,
+        kernel_syscall_rsp = const OFFSET_KERNEL_SYSCALL_RSP,
+        saved_rax_offset   = const OFFSET_SAVED_RAX,
+        syscall_dispatch   = sym ksyscall::syscall_dispatch,
+    )
+}
+
+/// 引数
+const MAX_ARGC: usize = 16;
+const MAX_ARG_LEN: usize = 256;
+
+/// 引数を vector にコピー
+fn copy_argv(argv_ptr: u64) -> Result<Vec<Vec<u8>>, &'static str> {
+    let mut argv = Vec::new();
+    if argv_ptr == 0 {
+        return Ok(argv);
+    }
+
+    for i in 0..MAX_ARGC {
+        let user_arg_ptr = unsafe { *((argv_ptr as *const u64).add(i)) };
+        if user_arg_ptr == 0 {
+            return Ok(argv);
+        }
+        argv.push(copy_cstr_from_user(user_arg_ptr, MAX_ARG_LEN)?);
+    }
+
+    Err("exec: too many arguments")
+}
+
+/// user から kernel に string をコピー
+fn copy_cstr_from_user(ptr: u64, max_len: usize) -> Result<Vec<u8>, &'static str> {
+    if ptr == 0 {
+        return Err("exec: null argument pointer");
+    }
+
+    let mut bytes = Vec::new();
+    for i in 0..max_len {
+        let byte = unsafe { *((ptr as *const u8).add(i)) };
+        if byte == 0 {
+            return Ok(bytes);
+        }
+        bytes.push(byte);
+    }
+
+    Err("exec: argument is too long")
+}
+
+/// user から kernel にバイナリをコピー
+fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
+    if ptr == 0 {
+        return Err("syscall: null pointer");
+    }
+
+    let process_page_table = {
+        let cpu = crate::cpu::CPU.lock();
+        cpu.current_process()
+            .ok_or("syscall: process not found")?
+            .page_table
+            .ok_or("syscall: no page table")?
+    };
+
+    let physical_memory_offset = crate::memory::PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("physical memory offset not initialized");
+    let pml4 = unsafe {
+        &mut *(crate::memory::va::phys_to_virt(process_page_table.start_address(), physical_memory_offset)
+            .as_mut_ptr::<x86_64::structures::paging::PageTable>())
+    };
+
+    let mut guard = crate::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = guard
+        .as_mut()
+        .expect("FRAME_ALLOCATOR not initialized");
+
+    let mut bytes = Vec::with_capacity(len);
+    let mut copied = 0usize;
+
+    while copied < len {
+        let va = VirtAddr::new(ptr + copied as u64);
+        let page_offset = usize::from(va.page_offset());
+        let to_copy = cmp::min(crate::memory::PAGE_SIZE - page_offset, len - copied);
+        let pte = unsafe {
+            crate::memory::va::walk_pagetable(
+                pml4,
+                va,
+                false,
+                physical_memory_offset,
+                frame_allocator,
+            )
+        }
+        .ok_or_else(|| {
+            crate::println!("[syscall] unmapped va={:#x}", va.as_u64());
+            "syscall: address is not mapped"
+        })?;
+
+        if !pte.flags().contains(x86_64::structures::paging::PageTableFlags::PRESENT) {
+            return Err("syscall: address is not present");
+        }
+        if !pte.flags().contains(x86_64::structures::paging::PageTableFlags::USER_ACCESSIBLE) {
+            return Err("syscall: address is not user-accessible");
+        }
+
+        let page_va = unsafe {
+            crate::memory::va::phys_to_virt(
+                x86_64::PhysAddr::new(pte.addr().as_u64()),
+                physical_memory_offset,
+            )
+        };
+        let slice = unsafe {
+            core::slice::from_raw_parts(page_va.as_ptr::<u8>().add(page_offset), to_copy)
+        };
+        bytes.extend_from_slice(slice);
+        copied += to_copy;
+    }
+
+    Ok(bytes)
+}

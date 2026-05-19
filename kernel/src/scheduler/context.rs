@@ -15,10 +15,13 @@ pub struct Context {
     pub cs: u64,
     pub ss: u64,
     pub rsp3: u64,
+    pub user_rip: u64,
+    pub user_rdi: u64,
+    pub user_rsi: u64,
 }
 
 impl Context {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Context {
             r15: 0,
             r14: 0,
@@ -32,6 +35,9 @@ impl Context {
             cs: 0,
             ss: 0,
             rsp3: 0,
+            user_rip: 0,
+            user_rdi: 0,
+            user_rsi: 0,
         }
     }
 }

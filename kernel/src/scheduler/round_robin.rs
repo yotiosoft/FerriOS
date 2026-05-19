@@ -1,4 +1,4 @@
-use crate::memory;
+use crate::{gdt, memory, thread};
 
 use super::{ Thread, ThreadState, THREAD_TABLE, NTHREAD, cpu::CPU, SCHEDULER_STARTED };
 use super::context::{ Context, switch_context };
@@ -50,22 +50,27 @@ impl super::Scheduler for RoundRobin {
                         if table[next_tid].pid.is_some() {
                             // ユーザスレッドの場合：プロセスのユーザページテーブルに切り替え
                             unsafe {
-                                memory::switch_to_user_page_table(&table[next_tid]);
+                                memory::umem::switch_to_user_page_table(&table[next_tid]);
                             }
                         }
                         else {
                             // カーネルスレッドの場合：カーネルページテーブルに切り替え
                             unsafe {
-                                memory::switch_to_kernel_page_table();
+                                memory::kmem::switch_to_kernel_page_table();
                             }
                         }
                         
                         let old_context = &mut cpu.scheduler as *mut Context;
                         let new_context = &table[next_tid].context as *const Context;
 
-                        //let ctx = &table[next_tid].context;
-                        //crate::println!("tid={} context: rsp={:#x} rip={:#x} rflags={:#x}",
-                        //    next_tid, ctx.rsp, ctx.rip, ctx.rflags);
+                        // CPU の syscall_rsp をスレッドの kstack に変更
+                        cpu.kernel_syscall_rsp = table[next_tid].kstack;
+                        // ユーザモードからの割り込み/例外は TSS.rsp0 を使う。
+                        // TrapFrame 用に確保した領域を踏まないよう、その直前を使う。
+                        gdt::set_privilege_stack_0(
+                            table[next_tid].kstack
+                                - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64
+                        );
 
                         drop(cpu);
                         drop(table);
@@ -88,7 +93,7 @@ impl super::Scheduler for RoundRobin {
 
         // カーネルページテーブルに切り替え
         unsafe {
-            memory::switch_to_kernel_page_table();
+            memory::kmem::switch_to_kernel_page_table();
         }
 
         let mut table = THREAD_TABLE.lock();
