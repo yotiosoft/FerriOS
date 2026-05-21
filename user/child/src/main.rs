@@ -1,9 +1,6 @@
 #![no_std]
-#![no_main]
 
 use userlib::*;
-
-userlib::entry!(main);
 
 fn main() -> RetValue {
     let pid = getpid();

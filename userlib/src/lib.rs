@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(lang_items)]
 
 use core::arch::asm;
 use core::fmt::{self, Write};
@@ -14,7 +15,6 @@ mod printfmt;
 pub use printfmt::*;
 
 mod panic;
-pub use panic::*;
 
 const EXEC_MAX_ARGC: usize = 16;
 const EXEC_MAX_ARG_LEN: usize = 256;
