@@ -14,6 +14,9 @@ pub use syscalls::*;
 mod printfmt;
 pub use printfmt::*;
 
+mod args;
+pub use args::{args, Args};
+
 mod panic;
 
 const EXEC_MAX_ARGC: usize = 16;

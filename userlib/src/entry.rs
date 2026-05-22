@@ -1,5 +1,7 @@
 use super::*;
 
+pub use args::*;
+
 #[lang = "termination"]
 pub trait Termination {
     fn report(self) -> RetValue;
@@ -24,7 +26,13 @@ fn lang_start<T: Termination + 'static>(
     argv: *const *const u8,
     sigpipe: u8,
 ) -> isize {
-    let _ = (argc, argv, sigpipe);
+    let _ = sigpipe;
+
+    unsafe {
+        args::ARGC = argc as usize;
+        args::ARGV = argv;
+    }
+
     let ret = main().report();
     exit(ret);
 }
