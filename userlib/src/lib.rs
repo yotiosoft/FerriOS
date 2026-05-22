@@ -17,6 +17,9 @@ pub use printfmt::*;
 mod args;
 pub use args::{args, Args};
 
+mod macros;
+pub use macros::*;
+
 mod panic;
 
 const EXEC_MAX_ARGC: usize = 16;
