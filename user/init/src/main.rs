@@ -27,6 +27,12 @@ fn main() {
     print_fmt!("[parent (pid={})] child process has exited; child's pid is {} and ret value is {}", pid, child_pid, status);
 
     // 2nd child
+    let alloced_memory = sbrk(1234);
+    let addr = alloced_memory as *mut u64;
+    unsafe {
+        *addr = 0;
+    }
+
     let ret = fork();
     let start = uptime();
     if ret == RET_ERROR {
@@ -34,8 +40,14 @@ fn main() {
     }
     if ret == 0 {
         // on the child process
+        unsafe {
+            *addr = 0;
+        }
         loop {
-            print_fmt!("[child pid = {} Hello!", getpid());
+            unsafe {
+                *addr += 1;
+                print_fmt!("[child (pid = {})] *addr = {}", pid, *addr);
+            }
         }
     }
 
@@ -53,15 +65,12 @@ fn main() {
     print_fmt!("[parent] pid = {} done.", pid);
 
     // sbrk test
-    let alloced_memory = sbrk(1234);
     if alloced_memory == RET_ERROR {
         print_fmt!("[parent] pid = {} alloc failed", pid);
     }
     else {
-        let addr = alloced_memory as *mut u64;
         unsafe {
-            *addr = 1234;
-            print_fmt!("[parent] pid = {} *addr = {}", pid, *addr);
+            print_fmt!("[parent (pid = {})] *addr = {}", pid, *addr);
         }
     }
 
