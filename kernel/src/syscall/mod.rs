@@ -5,7 +5,7 @@ use core::cmp;
 use core::mem::offset_of;
 use alloc::vec::Vec;
 
-use crate::gdt;
+use crate::{cpu, gdt, syscall};
 use crate::cpu::Cpu;
 
 mod ksyscall;
@@ -292,4 +292,12 @@ fn copy_to_user(ptr: abi::UserAddress, bytes: &[u8]) -> Result<(), &'static str>
     }
 
     Ok(())
+}
+
+pub fn exit_if_current_process_killed() {
+    let process = cpu::CPU.lock().current_process().expect("no process");
+    if process.killed {
+        ksyscall::exit(abi::RET_ERROR);
+        panic!("exit retured!");
+    }
 }

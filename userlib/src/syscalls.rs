@@ -94,3 +94,9 @@ pub fn wait(status_ptr: Option<&mut abi::RetValue>) -> SysRet {
         syscall(SYS_WAIT, status_ptr, 0, 0)
     }
 }
+
+pub fn kill(pid: abi::ProcessID) -> SysRet {
+    unsafe {
+        syscall(SYS_KILL, pid as i64, 0, 0)
+    }
+}

@@ -18,7 +18,6 @@ mod args;
 pub use args::{args, Args};
 
 mod macros;
-pub use macros::*;
 
 mod panic;
 

@@ -3,6 +3,7 @@ use crate::cpu;
 use crate::scheduler::yield_from_syscall_context;
 use crate::thread;
 use crate::thread::ThreadState;
+use crate::thread::uprocess::NPROCESS;
 use crate::thread::uprocess::PROCESS_TABLE;
 use crate::thread::uprocess::ProcessState;
 use abi::RetValue;
@@ -155,7 +156,8 @@ pub fn exit(ret_value: abi::RetValue) -> Result<(), &'static str> {
 }
 
 pub fn wait() -> Result<(ProcessID, abi::RetValue), &'static str> {
-    let pid = cpu::CPU.lock().current_pid().expect("no pid");
+    let process = cpu::CPU.lock().current_process().expect("no pid");
+    let pid = process.pid;
 
     loop {
         // ZONBIE 状態に子プロセスを探索
@@ -196,7 +198,31 @@ pub fn wait() -> Result<(ProcessID, abi::RetValue), &'static str> {
         if !havekids {
             return Err("no child process");
         }
+        if process.killed {
+            return Err("this process has killed");
+        }
 
         yield_from_syscall_context();
     }
+}
+
+pub fn kill(pid: abi::ProcessID) -> Result<(), &'static str> {
+    let mut process_table = PROCESS_TABLE.lock();
+
+    for i in 0..super::NPROCESS-1 {
+        let is_target = process_table[i]
+                    .as_ref()
+                    .is_some_and(|proc| proc.pid == pid);
+        if !is_target {
+            continue;
+        }
+
+        let mut proc = process_table[i].take().unwrap();
+        proc.killed = true;
+        process_table[i] = Some(proc);
+
+        return Ok(());
+    }
+
+    return Err("no process");
 }

@@ -41,6 +41,7 @@ pub struct Process {
     pub nthread: usize,                                     // Threads count
     pub page_table: Option<PhysFrame>,                      // Page Table of this process
     pub exit_status: abi::RetValue,                         // Exit return value
+    pub killed: bool,                                       // Process killed?
 }
 
 impl Process {
@@ -53,6 +54,7 @@ impl Process {
             nthread: 0,
             page_table: None,
             exit_status: abi::RET_SUCCESS,
+            killed: false,
         }
     }
 
@@ -178,6 +180,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
         nthread: 0,
         page_table: None,
         exit_status: abi::RET_SUCCESS,
+        killed: false,
     };
 
     // 1st thread を追加
@@ -232,6 +235,7 @@ fn mark_threads_as_runnable(process: Process) -> Result<(), &'static str> {
 
 /// プロセスを解放する
 fn free_process(process: &mut Process) -> Result<(), &'static str> {
+    // カーネルスタックを解放
     {
         let mut thread_table = THREAD_TABLE.lock();
         for tid in process.threads.into_iter().flatten() {
@@ -258,6 +262,7 @@ fn free_process(process: &mut Process) -> Result<(), &'static str> {
         }
     }
 
+    // ユーザ空間を解放
     if let Some(page_table) = process.page_table {
         // 現在の CR3 active なページでないことを確認
         let (current_page_table, _) = Cr3::read();
@@ -273,6 +278,20 @@ fn free_process(process: &mut Process) -> Result<(), &'static str> {
             .ok_or("FRAME_ALLOCATOR not initialized")?;
         memory::umem::free_uvm(page_table, frame_allocator)?;
     }
+
+    // プロセス構造体を初期化
+    let pid = process.pid;
+    let mut process_table = PROCESS_TABLE.lock();
+    process_table[pid] = Some(Process {
+        pid: 0,
+        ppid: None,
+        state: ProcessState::Unused,
+        threads: [None; NTHREAD_PER_PROCESS],
+        nthread: 0,
+        page_table: None,
+        exit_status: abi::RET_SUCCESS,
+        killed: false,
+    });
 
     Ok(())
 }

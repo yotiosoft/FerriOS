@@ -9,9 +9,11 @@ use abi::*;
 /// 戻り値はRAXに入る
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64, arg3: i64, tf: *mut thread::trapframe::TrapFrame) -> SysRet {
+    super::exit_if_current_process_killed();
+
     set_trapframe(tf);
     
-    match syscall_num {
+    let ret = match syscall_num {
         abi::SYS_PRINT_NUM => sys_print_num(arg1),
         abi::SYS_PRINT_STR => sys_print_str(arg1 as u64, arg2),
         abi::SYS_FORK => sys_fork(),
@@ -20,11 +22,16 @@ pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64
         abi::SYS_UPTIME => sys_uptime(),
         abi::SYS_EXIT => sys_exit(arg1 as RetValue),
         abi::SYS_WAIT => sys_wait(arg1 as UserAddress),
+        abi::SYS_KILL => sys_kill(arg1 as ProcessID),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             SysRet::MAX  // エラー
         }
-    }
+    };
+
+    super::exit_if_current_process_killed();
+
+    return ret;
 }
 
 /// TrapFrame をセットする
@@ -115,7 +122,11 @@ fn sys_uptime() -> SysRet {
 fn sys_exit(ret_value: abi::RetValue) -> SysRet {
     thread::uprocess::syscalls::exit(ret_value);
     panic!("why exit returns..?");
-    return -1;
+    return abi::RET_ERROR;
+}
+// for killed process
+pub fn exit(ret_value: abi::RetValue) -> SysRet {
+    sys_exit(ret_value)
 }
 
 /// wait
@@ -135,4 +146,12 @@ fn sys_wait(status_ptr: abi::UserAddress) -> SysRet {
         return pid as SysRet;
     }
     return abi::RET_ERROR;
+}
+
+/// kill
+fn sys_kill(pid: abi::ProcessID) -> SysRet {
+    match thread::uprocess::syscalls::kill(pid) {
+        Ok(_) => abi::RET_SUCCESS,
+        Err(e) => abi::RET_ERROR,
+    }
 }
