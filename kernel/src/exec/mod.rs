@@ -61,6 +61,7 @@ pub struct Exec {
     pub user_sp: u64,
     pub argc: usize,
     pub argv_user_ptr: u64,
+    pub heap_size: usize,
 }
 
 /// パスからユーザプログラムを解決して exec を完了する
@@ -87,7 +88,7 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
     let pml4 = unsafe {
         &mut *(memory::va::phys_to_virt(page_table.start_address(), physical_memory_offset).as_mut_ptr::<PageTable>())
     };
-    load_elf_segments(elf_image, elf, pml4, &mut user_mapper, frame_allocator)?;
+    let heap_size = load_elf_segments(elf_image, elf, pml4, &mut user_mapper, frame_allocator)?;
 
     // ユーザスタック範囲を計算し、先頭側にガードページを置く
     let stack_top = USER_STACK_TOP;
@@ -125,7 +126,8 @@ pub fn prepare_exec_image(elf_image: &[u8], argv: &[Vec<u8>]) -> Result<Exec, &'
         entry: elf.entry,
         user_sp,
         argc,
-        argv_user_ptr
+        argv_user_ptr,
+        heap_size
     })
 }
 
@@ -156,12 +158,14 @@ fn read_elf_header(image: &[u8]) -> Result<Elf64Header, &'static str> {
 }
 
 /// LOAD セグメントをユーザページテーブルへマップして内容を配置する
-fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<(), &'static str> {
+fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) -> Result<usize, &'static str> {
     let pa_offset = usize::try_from(elf.phoff).map_err(|_| "exec: invalid phoff")?;
     let pa_entry_size = usize::from(elf.phentsize);
     if pa_entry_size != size_of::<Elf64ProgramHeader>() {
         return Err("exec: unexpected program header size");
     }
+
+    let mut max_load_end = 0u64;
 
     for i in 0..usize::from(elf.phnum) {
         let start = pa_offset.checked_add(i.checked_mul(pa_entry_size).ok_or("exec: program header overflow")?).ok_or("exec: program header overflow")?;
@@ -198,7 +202,9 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
         }
 
         let segment_start = VirtAddr::new(program_header.vaddr);
-        let segment_end = VirtAddr::new(program_header.vaddr.checked_add(program_header.memsz).ok_or("exec: invalid segment address")?);
+        let segment_end_u64 = program_header.vaddr.checked_add(program_header.memsz).ok_or("exec: invalid segment address")?;
+        let segment_end = VirtAddr::new(segment_end_u64);
+        max_load_end = cmp::max(max_load_end, segment_end_u64);
 
         let start_page = Page::containing_address(segment_start);
         let end_page = Page::containing_address(segment_end - 1u64);
@@ -215,7 +221,17 @@ fn load_elf_segments(image: &[u8], elf: Elf64Header, pml4: &mut PageTable, user_
         copy_to_user_pagetable(pml4, frame_allocator, program_header.vaddr, &image[file_start..file_end])?;
     }
 
-    Ok(())
+    pg_round_up(max_load_end)
+}
+
+fn pg_round_up(value: u64) -> Result<usize, &'static str> {
+    let page_size = memory::PAGE_SIZE as u64;
+    let rounded = value
+        .checked_add(page_size - 1)
+        .ok_or("exec: heap size overflow")?
+        & !(page_size - 1);
+
+    usize::try_from(rounded).map_err(|_| "exec: heap size overflow")
 }
 
 fn ensure_user_page_mapping(
@@ -351,13 +367,13 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
     };
 
     // ロールバック用のスナップショットを作成しておく
-    let old_page_table = {
+    let (old_page_table, old_heap_size) = {
         let process_table = thread::uprocess::PROCESS_TABLE.lock();
         let process = process_table
             .get(current_pid)
             .and_then(|p| p.as_ref())
             .ok_or("exec: process table entry missing")?;
-        process.page_table
+        (process.page_table, process.heap_size)
     };
 
     let (old_context, old_trap_frame, old_saved_user_rsp) = {
@@ -385,6 +401,7 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
                 .and_then(|p| p.as_mut())
                 .ok_or("exec: process table entry missing")?;
             process.page_table = Some(prepared.page_table);
+            process.heap_size = prepared.heap_size;
         }
 
         {
@@ -419,10 +436,11 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
 
     if commit_result.is_err() {
         // 途中失敗時はロールバック
-        if let Some(old_pt) = old_page_table {
+        {
             let mut process_table = thread::uprocess::PROCESS_TABLE.lock();
             if let Some(process) = process_table.get_mut(current_pid).and_then(|p| p.as_mut()) {
-                process.page_table = Some(old_pt);
+                process.page_table = old_page_table;
+                process.heap_size = old_heap_size;
             }
         }
 

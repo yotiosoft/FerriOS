@@ -153,15 +153,128 @@ pub fn copy_uvm(frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pml4
     Ok((child_offset_table, child_pml4_frame))
 }
 
+/// alloc uvm
+/// プロセスのユーザ空間を oldsz から newsz まで拡張し、成功時は newsz を返す
+pub fn alloc_uvm(pml4: &mut PageTable, oldsz: usize, newsz: usize, frame_allocator: &mut (impl FrameAllocator<Size4KiB> + FrameDeallocator<Size4KiB>)) -> Result<usize, &'static str> {
+    let user_space_top = PAGETABLE_USER_SPACE_END.checked_shl(super::PTE_BASE_ADDRESS).ok_or("alloc_uvm: user space limit overflow")?;
+
+    if newsz >= user_space_top {
+        return Err("alloc_uvm: newsz is outside user space");
+    }
+    if newsz < oldsz {
+        return Ok(oldsz);
+    }
+
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+    let mut addr = page_round_up(oldsz)?;
+
+    while addr < newsz {
+        let frame = match frame_allocator.allocate_frame() {
+            Some(frame) => frame,
+            None => {
+                rollback_alloc_uvm(pml4, page_round_up(oldsz)?, addr, frame_allocator)?;
+                return Err("alloc_uvm: frame alloc failed");
+            }
+        };
+
+        let frame_va = physical_memory_offset + frame.start_address().as_u64();
+        unsafe {
+            core::ptr::write_bytes(frame_va.as_mut_ptr::<u8>(), 0, super::PAGE_SIZE);
+        }
+
+        let va = x86_64::VirtAddr::new(addr as u64);
+        let pte = unsafe {
+            va::walk_pagetable(pml4, va, true, physical_memory_offset, frame_allocator)
+        };
+        let pte = match pte {
+            Some(pte) => pte,
+            None => {
+                unsafe {
+                    frame_allocator.deallocate_frame(frame);
+                }
+                rollback_alloc_uvm(pml4, page_round_up(oldsz)?, addr, frame_allocator)?;
+                return Err("alloc_uvm: page table alloc failed");
+            }
+        };
+        if pte.flags().contains(PageTableFlags::PRESENT) {
+            unsafe {
+                frame_allocator.deallocate_frame(frame);
+            }
+            rollback_alloc_uvm(pml4, page_round_up(oldsz)?, addr, frame_allocator)?;
+            return Err("alloc_uvm: page is already mapped");
+        }
+
+        pte.set_frame(frame, PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
+        addr = addr.checked_add(super::PAGE_SIZE).ok_or("alloc_uvm: address overflow")?;
+    }
+
+    Ok(newsz)
+}
+
+/// dealloc uvm
+/// プロセスのユーザ空間を oldsz から newsz まで縮小し、成功時は newsz を返す
+pub fn dealloc_uvm(pml4: &mut PageTable, oldsz: usize, newsz: usize, frame_deallocator: &mut (impl FrameAllocator<Size4KiB> + FrameDeallocator<Size4KiB>)) -> Result<usize, &'static str> {
+    if newsz >= oldsz {
+        return Ok(oldsz);
+    }
+
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+    let mut addr = page_round_up(newsz)?;
+
+    while addr < oldsz {
+        let va = x86_64::VirtAddr::new(addr as u64);
+        if let Some(pte) = unsafe { va::walk_pagetable(pml4, va, false, physical_memory_offset, frame_deallocator) } {
+            if pte.flags().contains(PageTableFlags::PRESENT) {
+                let frame = frame_from_entry(pte)?;
+                unsafe {
+                    frame_deallocator.deallocate_frame(frame);
+                }
+                pte.set_unused();
+            }
+        }
+        addr = addr.checked_add(super::PAGE_SIZE).ok_or("dealloc_uvm: address overflow")?;
+    }
+
+    Ok(newsz)
+}
+
+fn page_round_up(value: usize) -> Result<usize, &'static str> {
+    value.checked_add(super::PAGE_SIZE - 1).map(|value| value & !(super::PAGE_SIZE - 1)).ok_or("alloc_uvm: size overflow")
+}
+
+fn rollback_alloc_uvm(pml4: &mut PageTable, start: usize, end: usize, frame_deallocator: &mut (impl FrameAllocator<Size4KiB> + FrameDeallocator<Size4KiB>)) -> Result<(), &'static str> {
+    let physical_memory_offset = PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("physical memory offset not initialized");
+    let mut addr = start;
+
+    while addr < end {
+        let va = x86_64::VirtAddr::new(addr as u64);
+        if let Some(pte) = unsafe {
+            va::walk_pagetable(pml4, va, false, physical_memory_offset, frame_deallocator)
+        } {
+            if pte.flags().contains(PageTableFlags::PRESENT) {
+                let frame = frame_from_entry(pte)?;
+                unsafe {
+                    frame_deallocator.deallocate_frame(frame);
+                }
+                pte.set_unused();
+            }
+        }
+        addr = addr
+            .checked_add(super::PAGE_SIZE)
+            .ok_or("alloc_uvm: rollback address overflow")?;
+    }
+
+    Ok(())
+}
+
 /// ユーザ空間のページテーブル階層と、それが参照する leaf frame を解放する
 ///
 /// # Safety contract
 /// 呼び出し元は `pml4_frame` が現在使用中の CR3 ではなく、このページテーブル階層が
 /// どこからも参照されていないことが保証されている必要あり
-pub fn free_uvm(
-    pml4_frame: PhysFrame,
-    frame_deallocator: &mut impl FrameDeallocator<Size4KiB>,
-) -> Result<(), &'static str> {
+pub fn free_uvm(pml4_frame: PhysFrame, frame_deallocator: &mut impl FrameDeallocator<Size4KiB>) -> Result<(), &'static str> {
     let physical_memory_offset = PHYSICAL_MEMORY_OFFSET
         .lock()
         .expect("physical memory offset not initialized");

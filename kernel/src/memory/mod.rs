@@ -22,6 +22,8 @@ const PAGETABLE_USER_SPACE_END: usize = 256; // PML4 entries 0-255 are for user 
 const PAGETABLE_KERNEL_SPACE_START: usize = 256;
 const PAGETABLE_KERNEL_SPACE_END: usize = 512;
 
+static PTE_BASE_ADDRESS: u32 = 39;
+
 pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 
 pub const PAGE_SIZE: usize = 4096;

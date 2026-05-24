@@ -140,6 +140,7 @@ pub fn create_user_process_from_path(path: &str) -> Result<(), &'static str> {
 
     let mut process = alloc_proc()?;
     process.page_table = Some(prepared.page_table);
+    process.heap_size = prepared.heap_size;
 
     {
         let mut thread_table = THREAD_TABLE.lock();
