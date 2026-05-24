@@ -30,6 +30,7 @@ pub const SYS_UPTIME: SyscallNum = 6;
 pub const SYS_EXIT: SyscallNum = 7;
 pub const SYS_WAIT: SyscallNum = 8;
 pub const SYS_KILL: SyscallNum = 9;
+pub const SYS_SBRK: SyscallNum = 10;
 
 /// return values
 pub const RET_SUCCESS: SysRet = 0;

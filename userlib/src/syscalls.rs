@@ -100,3 +100,9 @@ pub fn kill(pid: abi::ProcessID) -> SysRet {
         syscall(SYS_KILL, pid as i64, 0, 0)
     }
 }
+
+pub fn sbrk(n: isize) -> SysRet {
+    unsafe {
+        syscall(SYS_SBRK, n as i64, 0, 0)
+    }
+}

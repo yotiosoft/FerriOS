@@ -1,3 +1,4 @@
+use crate::memory;
 use crate::println;
 use crate::thread;
 use crate::exec;
@@ -23,6 +24,7 @@ pub extern "C" fn syscall_dispatch(syscall_num: SyscallNum, arg1: i64, arg2: i64
         abi::SYS_EXIT => sys_exit(arg1 as RetValue),
         abi::SYS_WAIT => sys_wait(arg1 as UserAddress),
         abi::SYS_KILL => sys_kill(arg1 as ProcessID),
+        abi::SYS_SBRK => sys_sbrk(arg1 as isize),
         _ => {
             crate::println!("[syscall] unknown syscall: {}", syscall_num);
             SysRet::MAX  // エラー
@@ -152,6 +154,14 @@ fn sys_wait(status_ptr: abi::UserAddress) -> SysRet {
 fn sys_kill(pid: abi::ProcessID) -> SysRet {
     match thread::uprocess::syscalls::kill(pid) {
         Ok(_) => abi::RET_SUCCESS,
+        Err(e) => abi::RET_ERROR,
+    }
+}
+
+/// sbrk
+fn sys_sbrk(n: isize) -> SysRet {
+    match memory::syscalls::sbrk(n) {
+        Ok(address) => address as SysRet,
         Err(e) => abi::RET_ERROR,
     }
 }

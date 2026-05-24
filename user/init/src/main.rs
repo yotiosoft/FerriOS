@@ -1,5 +1,7 @@
 #![no_std]
 
+use core::alloc;
+
 use userlib::*;
 
 fn main() {
@@ -49,6 +51,19 @@ fn main() {
     print_fmt!("[parent] pid = {} kill pid {}", pid, ret);
     kill(ret as ProcessID);
     print_fmt!("[parent] pid = {} done.", pid);
+
+    // sbrk test
+    let alloced_memory = sbrk(1234);
+    if alloced_memory == RET_ERROR {
+        print_fmt!("[parent] pid = {} alloc failed", pid);
+    }
+    else {
+        let addr = alloced_memory as *mut u64;
+        unsafe {
+            *addr = 1234;
+            print_fmt!("[parent] pid = {} *addr = {}", pid, *addr);
+        }
+    }
 
     loop {
         //print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
