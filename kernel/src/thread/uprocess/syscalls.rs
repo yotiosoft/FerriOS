@@ -14,8 +14,11 @@ static INIT_PID: ProcessID = 0;
 static INIT_TID: ThreadID = 0;
 
 pub fn fork() -> Result<ProcessID, &'static str> {
+    let cpu = crate::cpu::CPU.lock();
+    let current_process = cpu.current_process().expect("process not found");
+
     // プロセス割り当て
-    let mut process = super::alloc_proc()?;
+    let mut child_process = super::alloc_proc()?;
 
     // frame allocator を取得
     let mut guard = memory::FRAME_ALLOCATOR.lock();
@@ -23,15 +26,15 @@ pub fn fork() -> Result<ProcessID, &'static str> {
 
     // 現在のプロセスの PML4 page table を取得
     let mut current_process_pml4: &mut PageTable = {
-        let cpu = cpu::CPU.lock();
-        let phys_frame = cpu.current_process().expect("process not found").page_table.expect("no page table");
+        let phys_frame = current_process.page_table.expect("no page table");
 
-        let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET.lock().expect("physical memory offset not initialized");
+        let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET
+            .lock()
+            .expect("physical memory offset not initialized");
 
         // PhysFrame → 仮想アドレス → &mut PageTable
-        let virt = unsafe {
-            memory::va::phys_to_virt(phys_frame.start_address(), physical_memory_offset)
-        };
+        let virt =
+            unsafe { memory::va::phys_to_virt(phys_frame.start_address(), physical_memory_offset) };
         unsafe { &mut *virt.as_mut_ptr::<PageTable>() }
     };
 
@@ -39,30 +42,33 @@ pub fn fork() -> Result<ProcessID, &'static str> {
     let (_, page_table) = memory::umem::copy_uvm(frame_allocator, &mut current_process_pml4)?;
 
     // ページテーブル設定
-    process.page_table = Some(page_table);
+    child_process.page_table = Some(page_table);
 
     // ppid (parent pid) を設定
     {
-        let cpu = crate::cpu::CPU.lock();
-        process.ppid = cpu.current_pid();
+        child_process.ppid = Some(current_process.pid);
     }
 
     // 親プロセスの trapframe とユーザ復帰情報をコピー
     let (parent_tf, parent_user_rsp): (thread::trapframe::TrapFrame, u64) = {
-        let cpu = crate::cpu::CPU.lock();
         let tid = cpu.current_tid.expect("no current thread");
         let saved_user_rsp = cpu.saved_user_rsp;
         drop(cpu);
         let thread_table = crate::thread::THREAD_TABLE.lock();
-        (unsafe { *thread_table[tid].tf.expect("no trapframe") }, saved_user_rsp)
+        (
+            unsafe { *thread_table[tid].tf.expect("no trapframe") },
+            saved_user_rsp,
+        )
     };
     {
         let mut table = crate::thread::THREAD_TABLE.lock();
-        let child_tid = process.threads[0].expect("no child thread");
+        let child_tid = child_process.threads[0].expect("no child thread");
         let child = &mut table[child_tid];
 
         // xv6: *np->tf = *proc->tf
-        unsafe { *child.tf.expect("no trapframe") = parent_tf; }
+        unsafe {
+            *child.tf.expect("no trapframe") = parent_tf;
+        }
 
         // xv6: np->tf->eax = 0 (子の fork 戻り値を 0 に)
         unsafe {
@@ -73,12 +79,13 @@ pub fn fork() -> Result<ProcessID, &'static str> {
 
         // 子は fork から復帰する形で最初にユーザ空間へ入る
         child.context.rip = super::uthread::fork_return_trampoline as u64;
-        child.context.rsp = child.kstack - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64;
+        child.context.rsp =
+            child.kstack - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64;
         child.context.rsp3 = parent_user_rsp;
         child.context.user_rip = parent_tf.rcx;
         child.context.user_rdi = parent_tf.rdi;
         child.context.user_rsi = parent_tf.rsi;
-        
+
         crate::debug!(
             "[fork] child pid={}, tid={}, user_rip={:#x}, rsp3={:#x}, rax={:#x}",
             process.pid,
@@ -89,16 +96,17 @@ pub fn fork() -> Result<ProcessID, &'static str> {
         );
     }
 
-    // ステータスの設定
+    // ヒープサイズは親プロセスと同じ
+    child_process.heap_size = current_process.heap_size;
 
     // process_table に追加
     let mut process_table = super::PROCESS_TABLE.lock();
-    process_table[process.pid] = Some(process);
-    
-    // runnable に設定
-    super::mark_threads_as_runnable(process)?;
+    process_table[child_process.pid] = Some(child_process);
 
-    Ok(process.pid)
+    // runnable に設定
+    super::mark_threads_as_runnable(child_process)?;
+
+    Ok(child_process.pid)
 }
 
 pub fn getpid() -> Result<ProcessID, &'static str> {

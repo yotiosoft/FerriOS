@@ -42,6 +42,7 @@ pub struct Process {
     pub page_table: Option<PhysFrame>,                      // Page Table of this process
     pub exit_status: abi::RetValue,                         // Exit return value
     pub killed: bool,                                       // Process killed?
+    pub heap_size: usize,                                   // User heap size
 }
 
 impl Process {
@@ -55,6 +56,7 @@ impl Process {
             page_table: None,
             exit_status: abi::RET_SUCCESS,
             killed: false,
+            heap_size: 0,
         }
     }
 
@@ -181,6 +183,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
         page_table: None,
         exit_status: abi::RET_SUCCESS,
         killed: false,
+        heap_size: 0,
     };
 
     // 1st thread を追加
@@ -291,6 +294,7 @@ fn free_process(process: &mut Process) -> Result<(), &'static str> {
         page_table: None,
         exit_status: abi::RET_SUCCESS,
         killed: false,
+        heap_size: 0,
     });
 
     Ok(())
