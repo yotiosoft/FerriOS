@@ -76,63 +76,6 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pagetable: Option<&mut PageTable>) -> Result<(), &'static str> {
-    // ユーザページのフラグ
-    let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
-
-    // ユーザページテーブルを作成
-    let (mut user_mapper, page_table) = if let Some(parent_pagetable) = parent_pagetable {
-        memory::umem::copy_uvm(frame_allocator, parent_pagetable)
-    }
-    else {
-        memory::umem::new_uvm(frame_allocator)
-    }?;
-
-    // コードページ用領域を用意
-    let code_page = Page::containing_address(VirtAddr::new(USER_CODE_START));
-    let code_frame = frame_allocator.allocate_frame().expect("frame alloc failed");
-
-    // コードページにユーザコードをコピー
-    let physical_memory = {
-        let guard = memory::PHYSICAL_MEMORY_OFFSET.lock();
-        guard.expect("physical memory offset not initialized")
-    };
-    let dst: *mut u8 = (physical_memory + code_frame.start_address().as_u64()).as_mut_ptr();
-    unsafe {
-        core::ptr::copy_nonoverlapping(code.as_ptr(), dst, code.len());
-    }
-    
-    // コードページをユーザページテーブルにマップ
-    unsafe {
-        user_mapper.map_to(code_page, code_frame, user_flags, frame_allocator)
-            .map_err(|_| "code map_to failed")?.flush();
-    }
-
-    // ユーザスタック用領域を用意
-    let stack_start = USER_STACK_TOP - memory::STACK_SIZE as u64;
-    for i in 0..memory::STACK_PAGES as u64 {
-        let page = Page::containing_address(VirtAddr::new(stack_start + i * memory::PAGE_SIZE as u64));
-        let frame = frame_allocator.allocate_frame().ok_or("frame alloc failed")?;
-        unsafe {
-            user_mapper.map_to(page, frame, user_flags, frame_allocator).map_err(|_| "stack map_to failed")?.flush();
-        }
-    }
-
-    // プロセスを作成
-    let mut process = alloc_proc()?;
-
-    // ページテーブルを登録
-    process.page_table = Some(page_table);
-
-    // プロセスを Process Table に追加
-    add_to_process_table(process)?;
-
-    // 全スレッドを Runnable としてマーク
-    mark_threads_as_runnable(process)?;
-
-    Ok(())
-}
-
 /// 実行する ELF ファイルを指定してユーザプロセスを生成
 pub fn create_user_process_from_path(path: &str) -> Result<(), &'static str> {
     let elf = exec::user_programs::lookup(path).ok_or("program not found")?;

@@ -10,6 +10,7 @@ use crate::thread;
 pub mod kmem;
 pub mod umem;
 pub mod va;
+pub mod syscalls;
 
 lazy_static! {
     pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);

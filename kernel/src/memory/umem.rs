@@ -356,3 +356,50 @@ fn frame_from_entry(entry: &x86_64::structures::paging::page_table::PageTableEnt
         Err(FrameError::FrameNotPresent) => Err("page table entry not present"),
     }
 }
+
+/// 対象プロセスのヒープサイズを拡大縮小する
+pub fn grow_process_heap(n: isize, process: &mut thread::uprocess::Process) -> Result<(), &'static str> {
+    let old_size = process.heap_size;
+    
+    let page_table = get_process_page_table(*process)?;
+
+    let mut guard = super::FRAME_ALLOCATOR.lock();
+    let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+
+    if n > 0 {
+        match alloc_uvm(page_table, old_size, old_size + n as usize, frame_allocator) {
+            Ok(new_size) => {
+                process.heap_size = new_size;
+            },
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+    else if n < 0 {
+        match dealloc_uvm(page_table, old_size, old_size + n as usize, frame_allocator) {
+            Ok(new_size) => {
+                process.heap_size = new_size;
+            },
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// 対象プロセスの PageTable を取得する
+pub fn get_process_page_table(process: thread::uprocess::Process) -> Result<&'static mut PageTable, &'static str> {
+    let phys_frame = process.page_table.expect("no page table");
+
+    let physical_memory_offset = super::PHYSICAL_MEMORY_OFFSET
+        .lock()
+        .expect("physical memory offset not initialized");
+
+    // PhysFrame → 仮想アドレス → &mut PageTable
+    let virt =
+        unsafe { super::va::phys_to_virt(phys_frame.start_address(), physical_memory_offset) };
+    unsafe { Ok(&mut *virt.as_mut_ptr::<PageTable>()) }
+}

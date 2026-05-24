@@ -25,18 +25,7 @@ pub fn fork() -> Result<ProcessID, &'static str> {
     let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
 
     // 現在のプロセスの PML4 page table を取得
-    let mut current_process_pml4: &mut PageTable = {
-        let phys_frame = current_process.page_table.expect("no page table");
-
-        let physical_memory_offset = memory::PHYSICAL_MEMORY_OFFSET
-            .lock()
-            .expect("physical memory offset not initialized");
-
-        // PhysFrame → 仮想アドレス → &mut PageTable
-        let virt =
-            unsafe { memory::va::phys_to_virt(phys_frame.start_address(), physical_memory_offset) };
-        unsafe { &mut *virt.as_mut_ptr::<PageTable>() }
-    };
+    let mut current_process_pml4 = memory::umem::get_process_page_table(current_process)?;
 
     // proces state (page table) をコピー
     let (_, page_table) = memory::umem::copy_uvm(frame_allocator, &mut current_process_pml4)?;
