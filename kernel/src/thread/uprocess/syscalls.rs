@@ -65,9 +65,15 @@ pub fn fork() -> Result<ProcessID, &'static str> {
         unsafe { *child.tf.expect("no trapframe") = parent_tf; }
 
         // xv6: np->tf->eax = 0 (子の fork 戻り値を 0 に)
-        unsafe { (*child.tf.expect("no trapframe")).rax = 0; }
+        unsafe {
+            let child_tf = child.tf.expect("no trapframe");
+            (*child_tf).rax = 0;
+            (*child_tf).rsp = parent_user_rsp;
+        }
 
         // 子は fork から復帰する形で最初にユーザ空間へ入る
+        child.context.rip = super::uthread::fork_return_trampoline as u64;
+        child.context.rsp = child.kstack - core::mem::size_of::<thread::trapframe::TrapFrame>() as u64;
         child.context.rsp3 = parent_user_rsp;
         child.context.user_rip = parent_tf.rcx;
         child.context.user_rdi = parent_tf.rdi;

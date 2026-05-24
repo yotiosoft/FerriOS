@@ -46,7 +46,9 @@ fn main() {
     }
 
     // kill it
+    print_fmt!("[parent] pid = {} kill pid {}", pid, ret);
     kill(ret as ProcessID);
+    print_fmt!("[parent] pid = {} done.", pid);
 
     loop {
         //print_fmt!("[parent] pid = {} ticks = {}", pid, uptime());
