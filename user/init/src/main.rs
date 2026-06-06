@@ -1,7 +1,5 @@
 #![no_std]
 
-use core::alloc;
-
 use userlib::*;
 
 fn main() {
