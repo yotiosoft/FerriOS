@@ -15,6 +15,7 @@ pub fn init() {
     unsafe {
         interrupts::PICS.lock().initialize();
     }
+    interrupts::init_pit_timer(interrupts::TIMER_FREQUENCY_HZ);
     // IRQ4 のマスクを解除
     unsafe {
         use x86_64::instructions::port::Port;

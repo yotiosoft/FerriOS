@@ -65,6 +65,8 @@ impl super::Scheduler for RoundRobin {
 
                         // CPU の syscall_rsp をスレッドの kstack に変更
                         cpu.kernel_syscall_rsp = table[next_tid].kstack;
+                        // syscall から user mode へ戻るときに使う RSP は thread ごとの状態から復元する
+                        cpu.saved_user_rsp = table[next_tid].context.rsp3;
                         // ユーザモードからの割り込み/例外は TSS.rsp0 を使う。
                         // TrapFrame 用に確保した領域を踏まないよう、その直前を使う。
                         gdt::set_privilege_stack_0(
@@ -127,6 +129,48 @@ impl super::Scheduler for RoundRobin {
         }
 
         x86_64::instructions::interrupts::enable();
+    }
+
+    /// syscall 処理中のユーザスレッドからスケジューラに戻る
+    ///
+    /// syscall entry ではすでに `swapgs` 済みなので、別の user context を
+    /// 実行できるよう scheduler に渡る直前に user GS へ戻し、同じ syscall が
+    /// 再開された直後に kernel GS へ戻す。
+    fn on_syscall_yield(&self) {
+        x86_64::instructions::interrupts::disable();
+
+        unsafe {
+            memory::kmem::switch_to_kernel_page_table();
+        }
+
+        let mut table = THREAD_TABLE.lock();
+        let cpu = CPU.lock();
+
+        let current_tid = cpu.current_tid;
+        if current_tid.is_none() {
+            x86_64::instructions::interrupts::enable();
+            return;
+        }
+        let current_tid = current_tid.unwrap();
+
+        let (old_context, new_context) = {
+            // syscall 復帰に必要な user RSP を thread ごとの状態へ退避しておく
+            table[current_tid].context.rsp3 = cpu.saved_user_rsp;
+
+            let old_context = &mut table[current_tid].context as *mut Context;
+            let new_context = &cpu.scheduler as *const Context;
+
+            drop(cpu);
+            drop(table);
+
+            (old_context, new_context)
+        };
+
+        unsafe {
+            core::arch::asm!("swapgs");
+            switch_context(old_context, new_context);
+            core::arch::asm!("swapgs");
+        }
     }
 }
 

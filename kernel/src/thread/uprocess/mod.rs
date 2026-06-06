@@ -1,7 +1,8 @@
 use alloc::string::ToString;
 use spin::Mutex;
-use x86_64::{ VirtAddr, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
+use x86_64::{ VirtAddr, registers::control::Cr3, structures::paging::{ FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, PhysFrame, PageTable } };
 use lazy_static::lazy_static;
+use abi::ProcessID;
 
 use crate::{ memory, exec };
 
@@ -22,22 +23,40 @@ pub const NPROCESS: usize = 16;
 /// 1プロセスあたりの最大スレッド数
 pub const NTHREAD_PER_PROCESS: usize = 8;
 
+/// Process State
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessState {
+    Unused,
+    Alive,
+    Zombie,
+}
+
 /// Process Control Block (PCB)
 #[derive(Debug, Clone, Copy)]
 pub struct Process {
-    pub pid: usize,
-    pub threads: [Option<usize>; NTHREAD_PER_PROCESS],
-    pub nthread: usize,
-    pub page_table: Option<PhysFrame>,
+    pub pid: ProcessID,                                     // Process ID
+    pub ppid: Option<ProcessID>,                            // Parent Process ID
+    pub state: ProcessState,                                // Process State
+    pub threads: [Option<usize>; NTHREAD_PER_PROCESS],      // Threads the process owns
+    pub nthread: usize,                                     // Threads count
+    pub page_table: Option<PhysFrame>,                      // Page Table of this process
+    pub exit_status: abi::RetValue,                         // Exit return value
+    pub killed: bool,                                       // Process killed?
+    pub heap_size: usize,                                   // User heap size
 }
 
 impl Process {
     pub const fn new() -> Self {
         Process {
             pid: 0,
+            ppid: None,
+            state: ProcessState::Unused,
             threads: [None; NTHREAD_PER_PROCESS],
             nthread: 0,
             page_table: None,
+            exit_status: abi::RET_SUCCESS,
+            killed: false,
+            heap_size: 0,
         }
     }
 
@@ -57,63 +76,6 @@ lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<[Option<Process>; NPROCESS]> = Mutex::new([None; NPROCESS]);
 }
 
-pub fn create_user_process(code: &[u8], frame_allocator: &mut impl FrameAllocator<Size4KiB>, parent_pagetable: Option<&mut PageTable>) -> Result<(), &'static str> {
-    // ユーザページのフラグ
-    let user_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
-
-    // ユーザページテーブルを作成
-    let (mut user_mapper, page_table) = if let Some(parent_pagetable) = parent_pagetable {
-        memory::umem::copy_uvm(frame_allocator, parent_pagetable)
-    }
-    else {
-        memory::umem::new_uvm(frame_allocator)
-    }?;
-
-    // コードページ用領域を用意
-    let code_page = Page::containing_address(VirtAddr::new(USER_CODE_START));
-    let code_frame = frame_allocator.allocate_frame().expect("frame alloc failed");
-
-    // コードページにユーザコードをコピー
-    let physical_memory = {
-        let guard = memory::PHYSICAL_MEMORY_OFFSET.lock();
-        guard.expect("physical memory offset not initialized")
-    };
-    let dst: *mut u8 = (physical_memory + code_frame.start_address().as_u64()).as_mut_ptr();
-    unsafe {
-        core::ptr::copy_nonoverlapping(code.as_ptr(), dst, code.len());
-    }
-    
-    // コードページをユーザページテーブルにマップ
-    unsafe {
-        user_mapper.map_to(code_page, code_frame, user_flags, frame_allocator)
-            .map_err(|_| "code map_to failed")?.flush();
-    }
-
-    // ユーザスタック用領域を用意
-    let stack_start = USER_STACK_TOP - memory::STACK_SIZE as u64;
-    for i in 0..memory::STACK_PAGES as u64 {
-        let page = Page::containing_address(VirtAddr::new(stack_start + i * memory::PAGE_SIZE as u64));
-        let frame = frame_allocator.allocate_frame().ok_or("frame alloc failed")?;
-        unsafe {
-            user_mapper.map_to(page, frame, user_flags, frame_allocator).map_err(|_| "stack map_to failed")?.flush();
-        }
-    }
-
-    // プロセスを作成
-    let mut process = alloc_proc()?;
-
-    // ページテーブルを登録
-    process.page_table = Some(page_table);
-
-    // プロセスを Process Table に追加
-    add_to_process_table(process)?;
-
-    // 全スレッドを Runnable としてマーク
-    mark_threads_as_runnable(process)?;
-
-    Ok(())
-}
-
 /// 実行する ELF ファイルを指定してユーザプロセスを生成
 pub fn create_user_process_from_path(path: &str) -> Result<(), &'static str> {
     let elf = exec::user_programs::lookup(path).ok_or("program not found")?;
@@ -121,6 +83,7 @@ pub fn create_user_process_from_path(path: &str) -> Result<(), &'static str> {
 
     let mut process = alloc_proc()?;
     process.page_table = Some(prepared.page_table);
+    process.heap_size = prepared.heap_size;
 
     {
         let mut thread_table = THREAD_TABLE.lock();
@@ -157,9 +120,14 @@ fn alloc_proc() -> Result<Process, &'static str> {
     // プロセス構造体
     let mut process = Process {
         pid: pid,
+        ppid: None,
+        state: ProcessState::Alive,
         threads: [None; 8],
         nthread: 0,
         page_table: None,
+        exit_status: abi::RET_SUCCESS,
+        killed: false,
+        heap_size: 0,
     };
 
     // 1st thread を追加
@@ -173,7 +141,7 @@ fn alloc_proc() -> Result<Process, &'static str> {
 }
 
 /// PID 割り当て
-fn next_pid() -> Result<usize, &'static str> {
+fn next_pid() -> Result<ProcessID, &'static str> {
     let table = PROCESS_TABLE.lock();
     for i in 0..NPROCESS-1 {
         if table[i].is_none() {
@@ -208,6 +176,70 @@ fn mark_threads_as_runnable(process: Process) -> Result<(), &'static str> {
             thread_table[tid].state = ThreadState::Runnable;
         }
     }
+
+    Ok(())
+}
+
+/// プロセスを解放する
+fn free_process(process: &mut Process) -> Result<(), &'static str> {
+    // カーネルスタックを解放
+    {
+        let mut thread_table = THREAD_TABLE.lock();
+        for tid in process.threads.into_iter().flatten() {
+            if tid >= super::NTHREAD {
+                return Err("tid >= NTHREAD");
+            }
+
+            let thread = &mut thread_table[tid];
+            if thread.pid != Some(process.pid) {
+                return Err("thread does not belong to process");
+            }
+
+            if thread.kstack != 0 {
+                let layout = alloc::alloc::Layout::from_size_align(memory::STACK_SIZE, 16)
+                    .map_err(|_| "invalid kernel stack layout")?;
+                let kstack_base = (thread.kstack - memory::STACK_SIZE as u64) as *mut u8;
+                unsafe {
+                    alloc::alloc::dealloc(kstack_base, layout);
+                }
+            }
+
+            // TrapFrame はカーネルスタック上にあるので、スタック解放後に参照を残さない
+            *thread = super::Thread::new();
+        }
+    }
+
+    // ユーザ空間を解放
+    if let Some(page_table) = process.page_table {
+        // 現在の CR3 active なページでないことを確認
+        let (current_page_table, _) = Cr3::read();
+        if current_page_table == page_table {
+            return Err("cannot free cr3 active page table");
+        }
+
+        // free_uvm
+        process.page_table = None;
+        let mut frame_allocator_guard = memory::FRAME_ALLOCATOR.lock();
+        let frame_allocator = frame_allocator_guard
+            .as_mut()
+            .ok_or("FRAME_ALLOCATOR not initialized")?;
+        memory::umem::free_uvm(page_table, frame_allocator)?;
+    }
+
+    // プロセス構造体を初期化
+    let pid = process.pid;
+    let mut process_table = PROCESS_TABLE.lock();
+    process_table[pid] = Some(Process {
+        pid: 0,
+        ppid: None,
+        state: ProcessState::Unused,
+        threads: [None; NTHREAD_PER_PROCESS],
+        nthread: 0,
+        page_table: None,
+        exit_status: abi::RET_SUCCESS,
+        killed: false,
+        heap_size: 0,
+    });
 
     Ok(())
 }

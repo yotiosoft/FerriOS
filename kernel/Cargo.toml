@@ -3,6 +3,9 @@ name = "ferrios"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+debug_mode = []
+
 [[test]]
 name = "should_panic"
 harness = false

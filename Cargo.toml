@@ -7,6 +7,9 @@ name = "ferrios-runner"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+debug_mode = []
+
 [profile.dev]
 panic = "abort"
 

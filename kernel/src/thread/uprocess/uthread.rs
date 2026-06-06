@@ -1,4 +1,6 @@
 use crate::memory;
+use crate::thread::trapframe::TrapFrame;
+use core::mem::offset_of;
 
 use super::{ THREAD_TABLE, USER_STACK_TOP, USER_CODE_START, ThreadState };
 use crate::{gdt, thread::Thread, cpu};
@@ -73,4 +75,64 @@ unsafe extern "C" fn init_process_ring3_entry_trampoline() -> ! {
     }
 
     loop {}
+}
+
+/// fork した子プロセス用の trampoline
+/// fork の子は親の syscall 復帰点から実行を再開する
+/// コピー済み TrapFrame を復元して戻る
+pub(super) unsafe extern "C" fn fork_return_trampoline() -> ! {
+    let (tf, cs, ss, rsp3) = {
+        let table = THREAD_TABLE.lock();
+        let tid = cpu::CPU.lock().current_tid().expect("No running thread");
+        let thread = &table[tid];
+        (
+            thread.tf.expect("No trapframe"),
+            thread.context.cs,
+            thread.context.ss,
+            thread.context.rsp3,
+        )
+    };
+
+    unsafe {
+        core::arch::asm!(
+            "mov ax, r10w",
+            "mov ds, ax",
+            "mov es, ax",
+
+            "push r10",
+            "push r11",
+            "push qword ptr [r8 + {rflags_offset}]",
+            "push r9",
+            "push qword ptr [r8 + {rip_offset}]",
+
+            "mov r15, qword ptr [r8 + {r15_offset}]",
+            "mov r14, qword ptr [r8 + {r14_offset}]",
+            "mov r13, qword ptr [r8 + {r13_offset}]",
+            "mov r12, qword ptr [r8 + {r12_offset}]",
+            "mov rbp, qword ptr [r8 + {rbp_offset}]",
+            "mov rbx, qword ptr [r8 + {rbx_offset}]",
+            "mov rdx, qword ptr [r8 + {rdx_offset}]",
+            "mov rsi, qword ptr [r8 + {rsi_offset}]",
+            "mov rdi, qword ptr [r8 + {rdi_offset}]",
+            "mov rax, qword ptr [r8 + {rax_offset}]",
+            "iretq",
+            in("r8") tf,
+            in("r9") cs,
+            in("r10") ss,
+            in("r11") rsp3,
+            r15_offset = const offset_of!(TrapFrame, r15),
+            r14_offset = const offset_of!(TrapFrame, r14),
+            r13_offset = const offset_of!(TrapFrame, r13),
+            r12_offset = const offset_of!(TrapFrame, r12),
+            rbp_offset = const offset_of!(TrapFrame, rbp),
+            rbx_offset = const offset_of!(TrapFrame, rbx),
+            rdx_offset = const offset_of!(TrapFrame, rdx),
+            rsi_offset = const offset_of!(TrapFrame, rsi),
+            rdi_offset = const offset_of!(TrapFrame, rdi),
+            rax_offset = const offset_of!(TrapFrame, rax),
+            rflags_offset = const offset_of!(TrapFrame, r11),
+            rip_offset = const offset_of!(TrapFrame, rcx),
+            options(noreturn),
+        );
+    }
 }

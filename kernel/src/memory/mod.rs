@@ -1,6 +1,7 @@
 use x86_64::registers::control::Cr3Flags;
 use x86_64::{ VirtAddr, PhysAddr };
-use x86_64::structures::paging::{ FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB, page_table::PageTableEntry };
+use alloc::vec::Vec;
+use x86_64::structures::paging::{ FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB, page_table::PageTableEntry };
 use bootloader_api::info::{ MemoryRegions, MemoryRegionKind };
 use spin::Mutex;
 use lazy_static::lazy_static;
@@ -9,6 +10,7 @@ use crate::thread;
 pub mod kmem;
 pub mod umem;
 pub mod va;
+pub mod syscalls;
 
 lazy_static! {
     pub static ref KERNEL_PAGE_TABLE_FRAME: Mutex<Option<PhysFrame>> = Mutex::new(None);
@@ -20,6 +22,8 @@ const PAGETABLE_USER_SPACE_START: usize = 0;
 const PAGETABLE_USER_SPACE_END: usize = 256; // PML4 entries 0-255 are for user space
 const PAGETABLE_KERNEL_SPACE_START: usize = 256;
 const PAGETABLE_KERNEL_SPACE_END: usize = 512;
+
+static PTE_BASE_ADDRESS: u32 = 39;
 
 pub const PHYSICAL_KERNEL_BASE: u64 = 0xFFFF_8000_0000_0000;
 
@@ -63,9 +67,19 @@ pub fn create_example_mapping(page: Page, mapper: &mut OffsetPageTable, frame_al
 /// FrameAllcoator
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        if let Some(frame) = self.recycled_frames.pop() {
+            return Some(frame);
+        }
+
         let frame = self.usable_frames().nth(self.next);
         self.next += 1;
         frame
+    }
+}
+
+impl FrameDeallocator<Size4KiB> for BootInfoFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
+        self.recycled_frames.push(frame);
     }
 }
 
@@ -73,6 +87,7 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 pub struct BootInfoFrameAllocator {
     memory_map: &'static MemoryRegions,
     next: usize,
+    recycled_frames: Vec<PhysFrame>,
 }
 impl BootInfoFrameAllocator {
     /// 渡されたメモリマップから FrameAllocator を作る
@@ -80,6 +95,7 @@ impl BootInfoFrameAllocator {
         BootInfoFrameAllocator {
             memory_map,
             next: 0,
+            recycled_frames: Vec::new(),
         }
     }
 
@@ -110,4 +126,3 @@ unsafe fn active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut
 
     &mut *page_table_str
 }
-
