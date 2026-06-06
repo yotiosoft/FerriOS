@@ -21,6 +21,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
     for test in tests {
         test.run();
     }
-    
+
+    serial_println!("All kernel tests passed");
     exit_qemu(QemuExitCode::Success);
 }

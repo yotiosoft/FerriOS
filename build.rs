@@ -54,13 +54,157 @@ fn discover_apps(apps_root: &Path) -> Vec<AppBuild> {
     apps
 }
 
+fn remove_old_kernel_test_artifacts(target_dir: &Path, profile_dir: &str) {
+    let deps_dir = target_dir.join(format!("x86_64-unknown-none/{profile_dir}/deps"));
+    let Ok(entries) = fs::read_dir(deps_dir) else {
+        return;
+    };
+
+    for entry in entries {
+        let entry = entry.expect("failed to read kernel test artifact");
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if path.is_file() && file_name.starts_with("ferrios-") && path.extension().is_none() {
+            fs::remove_file(&path).expect("failed to remove old kernel test executable");
+        }
+    }
+}
+
+fn discover_kernel_test_executables(target_dir: &Path, profile_dir: &str) -> Vec<PathBuf> {
+    let deps_dir = target_dir.join(format!("x86_64-unknown-none/{profile_dir}/deps"));
+    let mut tests = Vec::new();
+
+    for entry in fs::read_dir(&deps_dir).expect("failed to read kernel test deps dir") {
+        let entry = entry.expect("failed to read kernel test artifact");
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if path.is_file() && file_name.starts_with("ferrios-") && path.extension().is_none() {
+            tests.push(path);
+        }
+    }
+
+    tests.sort();
+    tests
+}
+
+fn build_kernel_tests(
+    kernel_manifest: &Path,
+    apps_manifest: &Path,
+    manifest_dir: &Path,
+    out_dir: &Path,
+    profile_dir: &str,
+    is_release: bool,
+) {
+    let target_dir = manifest_dir.join("target/kernel-test-build");
+    remove_old_kernel_test_artifacts(&target_dir, profile_dir);
+
+    let mut args = vec![
+        "+nightly".to_string(),
+        "test".to_string(),
+        "--manifest-path".to_string(),
+        kernel_manifest.to_str().unwrap().to_string(),
+        "--target".to_string(),
+        "x86_64-unknown-none".to_string(),
+        "--target-dir".to_string(),
+        target_dir.to_str().unwrap().to_string(),
+        "-Zpanic-abort-tests".to_string(),
+        "--no-run".to_string(),
+        "--lib".to_string(),
+    ];
+    if is_release {
+        args.push("--release".to_string());
+    }
+    if std::env::var_os("CARGO_FEATURE_DEBUG_MODE").is_some() {
+        args.push("--features".to_string());
+        args.push("debug_mode".to_string());
+    }
+
+    let status = Command::new("cargo")
+        .env("USER_APPS_MANIFEST", apps_manifest)
+        .env_remove("CARGO_TARGET_DIR")
+        .args(&args)
+        .status()
+        .expect("failed to build kernel tests");
+
+    assert!(status.success(), "kernel test build failed");
+
+    let image_dir = out_dir.join("kernel-tests");
+    if image_dir.exists() {
+        fs::remove_dir_all(&image_dir).expect("failed to clean kernel test image dir");
+    }
+    fs::create_dir_all(&image_dir).expect("failed to create kernel test image dir");
+
+    let test_executables = discover_kernel_test_executables(&target_dir, profile_dir);
+    assert!(
+        !test_executables.is_empty(),
+        "kernel test build produced no test executables"
+    );
+
+    for (index, test_executable) in test_executables.iter().enumerate() {
+        let image_name = if test_executables.len() == 1 {
+            "kernel-lib.img".to_string()
+        } else {
+            format!("kernel-lib-{index}.img")
+        };
+        let image_path = image_dir.join(image_name);
+        bootloader::BiosBoot::new(test_executable)
+            .create_disk_image(&image_path)
+            .expect("failed to create kernel test disk image");
+    }
+
+    println!(
+        "cargo:rustc-env=KERNEL_TEST_IMAGE_DIR={}",
+        image_dir.display()
+    );
+}
+
+fn emit_rerun_instructions(kernel_manifest: &Path, apps: &[AppBuild]) {
+    println!("cargo:rerun-if-changed={}", kernel_manifest.display());
+    println!("cargo:rerun-if-changed=kernel/src");
+    println!("cargo:rerun-if-changed=abi/src");
+    println!("cargo:rerun-if-changed=abi/Cargo.toml");
+    println!("cargo:rerun-if-changed=apps");
+    for app in apps {
+        let app_dir = app
+            .manifest_path
+            .parent()
+            .expect("app manifest does not have parent");
+        println!("cargo:rerun-if-changed={}", app_dir.join("src").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            app_dir.join("linker.ld").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            app_dir.join("build.rs").display()
+        );
+        println!("cargo:rerun-if-changed={}", app.manifest_path.display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            app_dir.join(".cargo/config.toml").display()
+        );
+    }
+    println!("cargo:rerun-if-changed=userlib/src");
+    println!("cargo:rerun-if-changed=userlib/Cargo.toml");
+    println!("cargo:rerun-if-changed=x86_64-ferrios.json");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEBUG_MODE");
+    println!("cargo:rerun-if-env-changed=FERRIOS_BUILD_KERNEL_TESTS");
+}
+
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let kernel_manifest = PathBuf::from(&manifest_dir).join("kernel/Cargo.toml");
-    let apps_root = PathBuf::from(&manifest_dir).join("user");
-    let app_target = PathBuf::from(&manifest_dir).join("x86_64-ferrios.json");
-    let target_dir = PathBuf::from(&manifest_dir).join("target/kernel-build");
-    let apps_target_dir = PathBuf::from(&manifest_dir).join("target/user-build");
+    let manifest_dir = PathBuf::from(manifest_dir);
+    let kernel_manifest = manifest_dir.join("kernel/Cargo.toml");
+    let apps_root = manifest_dir.join("user");
+    let app_target = manifest_dir.join("x86_64-ferrios.json");
+    let target_dir = manifest_dir.join("target/kernel-build");
+    let apps_target_dir = manifest_dir.join("target/user-build");
     let apps = discover_apps(&apps_root);
     assert!(!apps.is_empty(), "no app crates found under user/");
 
@@ -96,10 +240,8 @@ fn main() {
             .expect("failed to build app");
         assert!(app_status.success(), "app build failed: {}", app.dir_name);
 
-        let elf_path = apps_target_dir.join(format!(
-            "x86_64-ferrios/{profile_dir}/{}",
-            app.package_name
-        ));
+        let elf_path =
+            apps_target_dir.join(format!("x86_64-ferrios/{profile_dir}/{}", app.package_name));
         let runtime_path = format!("/{}", app.dir_name);
         manifest_lines.push(format!(
             "{}\t{}\t{}",
@@ -125,6 +267,20 @@ fn main() {
     fs::create_dir_all(&apps_target_dir).expect("failed to create apps target dir");
     let apps_manifest = apps_target_dir.join("user_programs_manifest.tsv");
     fs::write(&apps_manifest, manifest_lines.join("\n")).expect("failed to write apps manifest");
+
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    emit_rerun_instructions(&kernel_manifest, &apps);
+    if std::env::var_os("FERRIOS_BUILD_KERNEL_TESTS").is_some() {
+        build_kernel_tests(
+            &kernel_manifest,
+            &apps_manifest,
+            &manifest_dir,
+            &out_dir,
+            profile_dir,
+            is_release,
+        );
+        return;
+    }
 
     let mut args = vec![
         "+nightly".to_string(),
@@ -155,34 +311,8 @@ fn main() {
 
     assert!(status.success(), "kernel build failed");
 
-    let kernel = target_dir
-        .join(format!("x86_64-unknown-none/{profile_dir}/ferrios"));
+    let kernel = target_dir.join(format!("x86_64-unknown-none/{profile_dir}/ferrios"));
 
-    println!("cargo:rerun-if-changed={}", kernel_manifest.display());
-    println!("cargo:rerun-if-changed=kernel/src");
-    println!("cargo:rerun-if-changed=abi/src");
-    println!("cargo:rerun-if-changed=abi/Cargo.toml");
-    println!("cargo:rerun-if-changed=apps");
-    for app in &apps {
-        let app_dir = app
-            .manifest_path
-            .parent()
-            .expect("app manifest does not have parent");
-        println!("cargo:rerun-if-changed={}", app_dir.join("src").display());
-        println!("cargo:rerun-if-changed={}", app_dir.join("linker.ld").display());
-        println!("cargo:rerun-if-changed={}", app_dir.join("build.rs").display());
-        println!("cargo:rerun-if-changed={}", app.manifest_path.display());
-        println!(
-            "cargo:rerun-if-changed={}",
-            app_dir.join(".cargo/config.toml").display()
-        );
-    }
-    println!("cargo:rerun-if-changed=userlib/src");
-    println!("cargo:rerun-if-changed=userlib/Cargo.toml");
-    println!("cargo:rerun-if-changed=x86_64-ferrios.json");
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEBUG_MODE");
-
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let bios_path = out_dir.join("bios.img");
 
     bootloader::BiosBoot::new(&kernel)
