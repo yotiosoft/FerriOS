@@ -112,7 +112,16 @@ mod tests {
     fn inode_block_check() {
         assert_eq!(inode_block(ROOT_INO), ROOT_INO / IPB as u32 + 2);
         assert_eq!(inode_block(0), 2);
+        assert_eq!(inode_block(IPB as u32 - 1), 2);
         assert_eq!(inode_block(IPB as u32), 3);
+    }
+
+    #[test_case]
+    fn inode_index_wraps_within_inode_block() {
+        assert_eq!(inode_index_in_block(0), 0);
+        assert_eq!(inode_index_in_block(IPB as u32 - 1), IPB - 1);
+        assert_eq!(inode_index_in_block(IPB as u32), 0);
+        assert_eq!(inode_index_in_block(IPB as u32 + 1), 1);
     }
 
     #[test_case]
@@ -120,6 +129,10 @@ mod tests {
         let ninodes = (IPB * 10) as u32;
 
         assert_eq!(bitmap_block(0, ninodes), ninodes / IPB as u32 + 3);
+        assert_eq!(
+            bitmap_block(BPB as u32 - 1, ninodes),
+            ninodes / IPB as u32 + 3
+        );
         assert_eq!(
             bitmap_block(BPB as u32, ninodes),
             BPB as u32 / BPB as u32 + ninodes / IPB as u32 + 3
@@ -149,6 +162,41 @@ mod tests {
     }
 
     #[test_case]
+    fn superblock_regions_are_contiguous_and_non_overlapping() {
+        let superblock = SuperBlock {
+            size: BPB as u32 * 2 + 17,
+            nblocks: 100,
+            ninodes: (IPB * 3 + 1) as u32,
+            nlog: 0,
+        };
+        let inode_end = superblock.inode_start() + superblock.inode_blocks();
+        let bitmap_end = superblock.bitmap_start() + superblock.bitmap_blocks();
+
+        assert_eq!(inode_end, superblock.bitmap_start());
+        assert_eq!(bitmap_end, superblock.data_start());
+        assert!(superblock.data_start() <= superblock.size);
+    }
+
+    #[test_case]
+    fn bitmap_blocks_rounds_up_for_partial_bitmap_block() {
+        let exact = SuperBlock {
+            size: BPB as u32,
+            nblocks: 0,
+            ninodes: IPB as u32,
+            nlog: 0,
+        };
+        let partial = SuperBlock {
+            size: BPB as u32 + 1,
+            nblocks: 0,
+            ninodes: IPB as u32,
+            nlog: 0,
+        };
+
+        assert_eq!(exact.bitmap_blocks(), 1);
+        assert_eq!(partial.bitmap_blocks(), 2);
+    }
+
+    #[test_case]
     fn bitmap_helpers_pick_byte_and_bit_inside_bitmap_block() {
         assert_eq!(bitmap_index_in_block(0), 0);
         assert_eq!(bitmap_mask(0), 0x01);
@@ -156,5 +204,13 @@ mod tests {
         assert_eq!(bitmap_mask(7), 0x80);
         assert_eq!(bitmap_index_in_block(8), 1);
         assert_eq!(bitmap_mask(8), 0x01);
+    }
+
+    #[test_case]
+    fn bitmap_helpers_wrap_at_bitmap_block_boundary() {
+        assert_eq!(bitmap_index_in_block(BPB as u32 - 1), BLOCK_SIZE - 1);
+        assert_eq!(bitmap_mask(BPB as u32 - 1), 0x80);
+        assert_eq!(bitmap_index_in_block(BPB as u32), 0);
+        assert_eq!(bitmap_mask(BPB as u32), 0x01);
     }
 }
