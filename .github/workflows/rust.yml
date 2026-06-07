@@ -17,10 +17,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Prepare
-      run: rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-      run: rustup override set nightly
-      run: rustup component add rust-src
-      run: rustup component add llvm-tools-preview
+      run: |
+        rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+        rustup override set nightly
+        rustup component add rust-src
+        rustup component add llvm-tools-preview
     - name: Build
       run: cargo build --verbose --release
     - name: Run tests
