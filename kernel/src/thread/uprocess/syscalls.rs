@@ -54,12 +54,10 @@ pub fn fork() -> Result<ProcessID, &'static str> {
         let child_tid = child_process.threads[0].expect("no child thread");
         let child = &mut table[child_tid];
 
-        // xv6: *np->tf = *proc->tf
         unsafe {
             *child.tf.expect("no trapframe") = parent_tf;
         }
 
-        // xv6: np->tf->eax = 0 (子の fork 戻り値を 0 に)
         unsafe {
             let child_tf = child.tf.expect("no trapframe");
             (*child_tf).rax = 0;

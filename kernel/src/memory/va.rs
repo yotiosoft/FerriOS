@@ -82,7 +82,7 @@ fn pte_phys_addr(entry: &PageTableEntry) -> PhysAddr {
     PhysAddr::new(entry.addr().as_u64())
 }
 
-/// xv6 の walkpgdir に相当する 4段ページテーブルウォーカー
+/// 4段ページテーブルウォーカー
 /// `va` に対応する PT エントリへの可変参照を返す
 /// `alloc == true` の場合、途中のテーブルが存在しなければ新たにフレームを割り当てる
 ///
