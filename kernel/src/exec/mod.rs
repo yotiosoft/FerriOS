@@ -468,3 +468,163 @@ fn commit_exec(prepared: Exec) -> Result<(), &'static str> {
 
     commit_result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_elf_header() -> Elf64Header {
+        let mut ident = [0u8; 16];
+        ident[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        ident[4] = ELF_CLASS_64;
+        ident[5] = ELF_DATA_LE;
+
+        Elf64Header {
+            ident,
+            elf_type: ELF_TYPE_EXEC,
+            machine: ELF_MACHINE_X86_64,
+            version: 1,
+            entry: 0x401000,
+            phoff: core::mem::size_of::<Elf64Header>() as u64,
+            shoff: 0,
+            flags: 0,
+            ehsize: core::mem::size_of::<Elf64Header>() as u16,
+            phentsize: core::mem::size_of::<Elf64ProgramHeader>() as u16,
+            phnum: 0,
+            shentsize: 0,
+            shnum: 0,
+            shstrndx: 0,
+        }
+    }
+
+    fn header_bytes(header: &Elf64Header) -> [u8; core::mem::size_of::<Elf64Header>()] {
+        let mut bytes = [0u8; core::mem::size_of::<Elf64Header>()];
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                header as *const Elf64Header as *const u8,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+            );
+        }
+
+        bytes
+    }
+
+    #[test_case]
+    fn read_elf_header_accepts_valid_x86_64_exec_header() {
+        let bytes = header_bytes(&valid_elf_header());
+        let elf = read_elf_header(&bytes).expect("valid ELF header");
+
+        assert_eq!(elf.magic(), ELF_MAGIC_NUM);
+        assert_eq!(elf.entry, 0x401000);
+        assert_eq!(elf.phoff, core::mem::size_of::<Elf64Header>() as u64);
+        assert_eq!(
+            elf.phentsize,
+            core::mem::size_of::<Elf64ProgramHeader>() as u16
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_truncated_header() {
+        let bytes = [0u8; core::mem::size_of::<Elf64Header>() - 1];
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: ELF header is truncated")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_bad_magic() {
+        let mut header = valid_elf_header();
+        header.ident[0] = 0;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: bad ELF magic")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_unsupported_class() {
+        let mut header = valid_elf_header();
+        header.ident[4] = 1;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: unsupported ELF class")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_unsupported_endianness() {
+        let mut header = valid_elf_header();
+        header.ident[5] = 2;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: unsupported ELF class")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_non_executable_type() {
+        let mut header = valid_elf_header();
+        header.elf_type = 1;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: unsupported ELF target")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_non_x86_64_machine() {
+        let mut header = valid_elf_header();
+        header.machine = 0x28;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: unsupported ELF target")
+        );
+    }
+
+    #[test_case]
+    fn read_elf_header_rejects_unsupported_version() {
+        let mut header = valid_elf_header();
+        header.version = 0;
+        let bytes = header_bytes(&header);
+
+        assert_eq!(
+            read_elf_header(&bytes).map(|_| ()),
+            Err("exec: unsupported ELF target")
+        );
+    }
+
+    #[test_case]
+    fn pg_round_up_handles_page_boundaries() {
+        assert_eq!(pg_round_up(0), Ok(0));
+        assert_eq!(pg_round_up(memory::PAGE_SIZE as u64 - 1), Ok(memory::PAGE_SIZE));
+        assert_eq!(pg_round_up(memory::PAGE_SIZE as u64), Ok(memory::PAGE_SIZE));
+        assert_eq!(
+            pg_round_up(memory::PAGE_SIZE as u64 + 1),
+            Ok(memory::PAGE_SIZE * 2)
+        );
+    }
+
+    #[test_case]
+    fn pg_round_up_reports_overflow() {
+        assert_eq!(pg_round_up(u64::MAX), Err("exec: heap size overflow"));
+    }
+
+    #[test_case]
+    fn exec_unknown_path_returns_not_found() {
+        assert_eq!(exec("/missing", &[]), Err("exec: program not found"));
+    }
+}
