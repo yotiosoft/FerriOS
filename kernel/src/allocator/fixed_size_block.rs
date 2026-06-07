@@ -43,6 +43,96 @@ impl FixedSizeBlockAllocator {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEAP_SIZE: usize = 8192;
+
+    #[repr(align(4096))]
+    struct TestHeap([u8; HEAP_SIZE]);
+
+    fn heap_bounds(heap: &mut TestHeap) -> (usize, usize) {
+        (heap.0.as_mut_ptr() as usize, heap.0.len())
+    }
+
+    #[test_case]
+    fn list_index_selects_smallest_fitting_block() {
+        assert_eq!(list_index(&Layout::from_size_align(1, 1).unwrap()), Some(0));
+        assert_eq!(list_index(&Layout::from_size_align(9, 1).unwrap()), Some(1));
+        assert_eq!(list_index(&Layout::from_size_align(17, 1).unwrap()), Some(2));
+        assert_eq!(list_index(&Layout::from_size_align(1, 128).unwrap()), Some(4));
+    }
+
+    #[test_case]
+    fn list_index_returns_none_for_large_layout() {
+        assert_eq!(
+            list_index(&Layout::from_size_align(4096, 8).unwrap()),
+            None
+        );
+        assert_eq!(
+            list_index(&Layout::from_size_align(8, 4096).unwrap()),
+            None
+        );
+    }
+
+    #[test_case]
+    fn fixed_size_block_allocator_returns_aligned_blocks() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = lock::Locked::new(FixedSizeBlockAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(24, 32).unwrap();
+        let ptr = unsafe { allocator.alloc(layout) };
+
+        assert!(!ptr.is_null());
+        assert_eq!(ptr as usize % 32, 0);
+    }
+
+    #[test_case]
+    fn fixed_size_block_allocator_reuses_freed_block() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = lock::Locked::new(FixedSizeBlockAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(32, 32).unwrap();
+        let first = unsafe { allocator.alloc(layout) };
+        assert!(!first.is_null());
+
+        unsafe {
+            allocator.dealloc(first, layout);
+        }
+
+        let reused = unsafe { allocator.alloc(layout) };
+        assert_eq!(reused, first);
+    }
+
+    #[test_case]
+    fn fixed_size_block_allocator_uses_fallback_for_large_layouts() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = lock::Locked::new(FixedSizeBlockAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(4096, 4096).unwrap();
+        let ptr = unsafe { allocator.alloc(layout) };
+
+        assert!(!ptr.is_null());
+        assert_eq!(ptr as usize % 4096, 0);
+    }
+}
+
 /// 与えられたレイアウトに対して適切なブロックサイズを選ぶ
 /// 
 /// `BLOCK_SIZES` 配列のインデックスを返す

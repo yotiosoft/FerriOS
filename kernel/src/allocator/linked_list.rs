@@ -22,6 +22,92 @@ impl ListNode {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEAP_SIZE: usize = 512;
+
+    #[repr(align(64))]
+    struct TestHeap([u8; HEAP_SIZE]);
+
+    fn heap_bounds(heap: &mut TestHeap) -> (usize, usize) {
+        (heap.0.as_mut_ptr() as usize, heap.0.len())
+    }
+
+    #[test_case]
+    fn linked_list_allocator_allocates_aligned_region() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = Locked::new(LinkedListAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(24, 32).unwrap();
+        let ptr = unsafe { allocator.alloc(layout) };
+
+        assert!(!ptr.is_null());
+        assert_eq!(ptr as usize % 32, 0);
+    }
+
+    #[test_case]
+    fn linked_list_allocator_returns_null_when_region_is_too_small() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = Locked::new(LinkedListAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(HEAP_SIZE + 1, 8).unwrap();
+        let ptr = unsafe { allocator.alloc(layout) };
+
+        assert!(ptr.is_null());
+    }
+
+    #[test_case]
+    fn linked_list_allocator_reuses_deallocated_region() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = Locked::new(LinkedListAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let layout = Layout::from_size_align(32, 16).unwrap();
+        let first = unsafe { allocator.alloc(layout) };
+        assert!(!first.is_null());
+
+        unsafe {
+            allocator.dealloc(first, layout);
+        }
+
+        let reused = unsafe { allocator.alloc(layout) };
+        assert_eq!(reused, first);
+    }
+
+    #[test_case]
+    fn linked_list_allocator_rejects_tiny_remainder() {
+        let mut heap = TestHeap([0; HEAP_SIZE]);
+        let (heap_start, heap_size) = heap_bounds(&mut heap);
+        let allocator = Locked::new(LinkedListAllocator::new());
+
+        unsafe {
+            allocator.lock().init(heap_start, heap_size);
+        }
+
+        let too_tight = Layout::from_size_align(HEAP_SIZE - core::mem::size_of::<ListNode>() / 2, 8)
+            .unwrap();
+        let ptr = unsafe { allocator.alloc(too_tight) };
+
+        assert!(ptr.is_null());
+    }
+}
+
 pub struct LinkedListAllocator {
     head: ListNode,
 }
