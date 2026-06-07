@@ -184,3 +184,71 @@ fn find_next_runnable_thread(table: &[Thread; NTHREAD], current_tid: Option<usiz
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_table() -> [Thread; NTHREAD] {
+        [Thread::new(); NTHREAD]
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_returns_none_when_no_thread_is_runnable() {
+        let table = empty_table();
+
+        assert_eq!(find_next_runnable_thread(&table, None), None);
+        assert_eq!(find_next_runnable_thread(&table, Some(0)), None);
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_starts_at_zero_when_current_is_none() {
+        let mut table = empty_table();
+        table[0].state = ThreadState::Runnable;
+        table[3].state = ThreadState::Runnable;
+
+        assert_eq!(find_next_runnable_thread(&table, None), Some(0));
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_selects_next_runnable_after_current() {
+        let mut table = empty_table();
+        table[2].state = ThreadState::Runnable;
+        table[5].state = ThreadState::Runnable;
+
+        assert_eq!(find_next_runnable_thread(&table, Some(2)), Some(5));
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_wraps_around_table_end() {
+        let mut table = empty_table();
+        table[1].state = ThreadState::Runnable;
+        table[NTHREAD - 1].state = ThreadState::Runnable;
+
+        assert_eq!(
+            find_next_runnable_thread(&table, Some(NTHREAD - 1)),
+            Some(1)
+        );
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_skips_non_runnable_states() {
+        let mut table = empty_table();
+        table[1].state = ThreadState::Unused;
+        table[2].state = ThreadState::Embryo;
+        table[3].state = ThreadState::Sleeping;
+        table[4].state = ThreadState::Running;
+        table[5].state = ThreadState::Zombie;
+        table[6].state = ThreadState::Runnable;
+
+        assert_eq!(find_next_runnable_thread(&table, Some(0)), Some(6));
+    }
+
+    #[test_case]
+    fn find_next_runnable_thread_can_return_current_only_after_full_cycle() {
+        let mut table = empty_table();
+        table[7].state = ThreadState::Runnable;
+
+        assert_eq!(find_next_runnable_thread(&table, Some(7)), Some(7));
+    }
+}
