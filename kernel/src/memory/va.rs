@@ -186,3 +186,167 @@ pub fn map_pages(user_mapper: &mut OffsetPageTable<'static>, frame_allocator: &m
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PHYSICAL_MEMORY_OFFSET: u64 = 0xFFFF_A000_0000_0000;
+    const TEST_FRAME_COUNT: usize = 8;
+
+    #[derive(Clone, Copy)]
+    #[repr(align(4096))]
+    struct AlignedFrame([u8; super::super::PAGE_SIZE]);
+
+    static mut TEST_FRAMES: [AlignedFrame; TEST_FRAME_COUNT] =
+        [AlignedFrame([0xcc; super::super::PAGE_SIZE]); TEST_FRAME_COUNT];
+
+    struct TestFrameAllocator {
+        next: usize,
+        frames: [PhysFrame; TEST_FRAME_COUNT],
+    }
+
+    unsafe impl FrameAllocator<Size4KiB> for TestFrameAllocator {
+        fn allocate_frame(&mut self) -> Option<PhysFrame> {
+            let frame = self.frames.get(self.next).copied();
+            self.next += usize::from(frame.is_some());
+            frame
+        }
+    }
+
+    fn physical_memory_offset() -> VirtAddr {
+        VirtAddr::new(PHYSICAL_MEMORY_OFFSET)
+    }
+
+    fn test_frame(index: usize) -> PhysFrame {
+        let frame_ptr = unsafe { core::ptr::addr_of!(TEST_FRAMES[index]) };
+        let frame_va = VirtAddr::new(frame_ptr as u64);
+        let frame_pa = translate_addr_inner(frame_va, physical_memory_offset())
+            .expect("test frame virtual address should be mapped");
+
+        PhysFrame::containing_address(frame_pa)
+    }
+
+    fn reset_test_frames() -> TestFrameAllocator {
+        unsafe {
+            for frame in core::ptr::addr_of_mut!(TEST_FRAMES).as_mut().unwrap() {
+                frame.0.fill(0xcc);
+            }
+        }
+
+        TestFrameAllocator {
+            next: 0,
+            frames: [
+                test_frame(0),
+                test_frame(1),
+                test_frame(2),
+                test_frame(3),
+                test_frame(4),
+                test_frame(5),
+                test_frame(6),
+                test_frame(7),
+            ],
+        }
+    }
+
+    fn fresh_page_table(frame_allocator: &mut TestFrameAllocator) -> &'static mut PageTable {
+        let frame = frame_allocator
+            .allocate_frame()
+            .expect("test pml4 frame should be available");
+        init_page_table(frame, physical_memory_offset());
+
+        unsafe { table_from_frame(frame, physical_memory_offset()) }
+    }
+
+    #[test_case]
+    fn page_table_indexes_extract_expected_bits() {
+        let va = VirtAddr::new(
+            (0x12u64 << 39) | (0x34u64 << 30) | (0x56u64 << 21) | (0x78u64 << 12),
+        );
+
+        assert_eq!(pml4_index(va), 0x12);
+        assert_eq!(pdpt_index(va), 0x34);
+        assert_eq!(pd_index(va), 0x56);
+        assert_eq!(pt_index(va), 0x78);
+    }
+
+    #[test_case]
+    fn phys_to_virt_adds_physical_memory_offset() {
+        let phys = PhysAddr::new(0x1234_5000);
+        let virt = unsafe { phys_to_virt(phys, physical_memory_offset()) };
+
+        assert_eq!(virt.as_u64(), PHYSICAL_MEMORY_OFFSET + phys.as_u64());
+    }
+
+    #[test_case]
+    fn init_page_table_zeroes_frame() {
+        let frame = test_frame(0);
+        init_page_table(frame, physical_memory_offset());
+        let table = unsafe { table_from_frame(frame, physical_memory_offset()) };
+
+        assert!(table.iter().all(|entry| entry.is_unused()));
+    }
+
+    #[test_case]
+    fn walk_pagetable_without_alloc_returns_none_for_missing_mapping() {
+        let mut frame_allocator = reset_test_frames();
+        let pml4 = fresh_page_table(&mut frame_allocator);
+        let va = VirtAddr::new(0x0000_1234_5678);
+
+        let entry = unsafe {
+            walk_pagetable(pml4, va, false, physical_memory_offset(), &mut frame_allocator)
+        };
+
+        assert!(entry.is_none());
+        assert_eq!(frame_allocator.next, 1);
+    }
+
+    #[test_case]
+    fn walk_pagetable_with_alloc_creates_intermediate_tables() {
+        let mut frame_allocator = reset_test_frames();
+        let pml4 = fresh_page_table(&mut frame_allocator);
+        let va = VirtAddr::new(0x0000_1234_5678);
+
+        let entry = unsafe {
+            walk_pagetable(pml4, va, true, physical_memory_offset(), &mut frame_allocator)
+        }
+        .expect("walk_pagetable should return leaf entry");
+
+        assert!(entry.is_unused());
+        assert_eq!(frame_allocator.next, 4);
+
+        let expected_flags =
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+        let pml4_entry = &pml4[pml4_index(va)];
+        assert!(pml4_entry.flags().contains(expected_flags));
+
+        let pdpt = unsafe { table_from_entry(pml4_entry, physical_memory_offset()) };
+        let pdpt_entry = &pdpt[pdpt_index(va)];
+        assert!(pdpt_entry.flags().contains(expected_flags));
+
+        let pd = unsafe { table_from_entry(pdpt_entry, physical_memory_offset()) };
+        let pd_entry = &pd[pd_index(va)];
+        assert!(pd_entry.flags().contains(expected_flags));
+    }
+
+    #[test_case]
+    fn walk_pagetable_reuses_existing_intermediate_tables() {
+        let mut frame_allocator = reset_test_frames();
+        let pml4 = fresh_page_table(&mut frame_allocator);
+        let va = VirtAddr::new(0x0000_1234_5678);
+
+        unsafe {
+            walk_pagetable(pml4, va, true, physical_memory_offset(), &mut frame_allocator)
+                .expect("first walk should allocate intermediate tables");
+        }
+        let used_after_first_walk = frame_allocator.next;
+
+        unsafe {
+            walk_pagetable(pml4, va, true, physical_memory_offset(), &mut frame_allocator)
+                .expect("second walk should reuse intermediate tables");
+        }
+
+        assert_eq!(used_after_first_walk, 4);
+        assert_eq!(frame_allocator.next, used_after_first_walk);
+    }
+}
