@@ -44,7 +44,7 @@ fn main() {
         loop {
             unsafe {
                 *addr += 1;
-                print_fmt!("[child (pid = {})] *addr = {}", pid, *addr);
+                print_fmt!("[child (pid = {})] *addr = {}", getpid(), *addr);
             }
         }
     }
