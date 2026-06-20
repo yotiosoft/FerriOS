@@ -20,7 +20,8 @@ pub trait BlockDevice {
     fn write_block(&self, block_no: u64, src: &[u8; BLOCK_SIZE]) -> Result<(), BlockError>;
 }
 
-static ROOT_BLOCK_DEVICE: spin::Mutex<Option<ramdisk::RamBlockDevice<'static>>> = spin::Mutex::new(None);
+static ROOT_BLOCK_DEVICE: spin::Mutex<Option<ramdisk::RamBlockDevice<'static>>> =
+    spin::Mutex::new(None);
 
 pub fn init_root_device(image: &'static mut [u8]) -> Result<(), BlockError> {
     let device = ramdisk::RamBlockDevice::new(image)?;

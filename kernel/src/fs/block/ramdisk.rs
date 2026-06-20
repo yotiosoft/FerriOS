@@ -1,4 +1,4 @@
-use super::{ BLOCK_SIZE, BlockDevice, BlockError };
+use super::{BLOCK_SIZE, BlockDevice, BlockError};
 
 pub struct RamBlockDevice<'a> {
     image: spin::Mutex<&'a mut [u8]>,
