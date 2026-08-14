@@ -119,20 +119,20 @@ fn kernel_test_executables_from_cargo_json(output: &str) -> Vec<PathBuf> {
         if message.get("reason").and_then(|reason| reason.as_str()) != Some("compiler-artifact") {
             continue;
         }
-        if !message
-            .get("target")
-            .and_then(|target| target.get("kind"))
-            .and_then(|kind| kind.as_array())
-            .is_some_and(|kind| kind.iter().any(|kind| kind.as_str() == Some("test")))
-        {
-            continue;
-        }
         let Some(executable) = message
             .get("executable")
             .and_then(|executable| executable.as_str())
         else {
             continue;
         };
+        if !message
+            .get("profile")
+            .and_then(|profile| profile.get("test"))
+            .and_then(|test| test.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
 
         tests.push(PathBuf::from(executable));
     }
