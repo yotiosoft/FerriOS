@@ -20,10 +20,9 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install qemu-system
-        rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-        rustup override set nightly
-        rustup component add rust-src
-        rustup component add llvm-tools-preview
+        rustup toolchain install nightly-2026-02-14 --profile minimal --component rust-src --component llvm-tools-preview --target x86_64-unknown-none
+        rustup default nightly-2026-02-14
+        rustup show active-toolchain
     - name: Build
       run: cargo build --verbose --release
     - name: Run tests
