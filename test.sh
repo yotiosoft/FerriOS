@@ -12,13 +12,13 @@ if [ "$BUILD_PROFILE" = "release" ]; then
     PROFILE_FLAG=(--release)
 fi
 
-find "target/$BUILD_PROFILE/build"/ferrios-runner-*/out/kernel-tests -name "*.img" -delete 2>/dev/null || true
+find "target/$BUILD_PROFILE/build" -path "*/out/kernel-tests/*.img" -delete 2>/dev/null || true
 
 echo "Building kernel tests in $BUILD_PROFILE profile"
 
-FERRIOS_BUILD_KERNEL_TESTS=1 cargo test --no-run "${PROFILE_FLAG[@]}" 2>&1
+FERRIOS_BUILD_KERNEL_TESTS=1 FERRIOS_KERNEL_TEST_RUN_ID="$(date +%s%N)" cargo test --no-run "${PROFILE_FLAG[@]}" 2>&1
 
-mapfile -t IMAGES < <(find "target/$BUILD_PROFILE/build"/ferrios-runner-*/out/kernel-tests -name "*.img" 2>/dev/null | sort)
+mapfile -t IMAGES < <(find "target/$BUILD_PROFILE/build" -path "*/out/kernel-tests/*.img" 2>/dev/null | sort)
 
 if [ "${#IMAGES[@]}" -eq 0 ]; then
     echo "No kernel test images were generated."

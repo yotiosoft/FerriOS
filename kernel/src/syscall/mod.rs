@@ -1,12 +1,12 @@
-use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, SFMask};
-use x86_64::VirtAddr;
+use alloc::vec::Vec;
 use core::arch::naked_asm;
 use core::cmp;
 use core::mem::offset_of;
-use alloc::vec::Vec;
+use x86_64::registers::model_specific::{Efer, EferFlags, LStar, SFMask, Star};
+use x86_64::VirtAddr;
 
-use crate::{cpu, gdt, syscall};
 use crate::cpu::Cpu;
+use crate::{cpu, gdt, syscall};
 
 mod ksyscall;
 
@@ -28,7 +28,8 @@ pub fn init() -> Result<(), &'static str> {
         gdt::GDT.1.user_data_selector,
         gdt::GDT.1.kernel_code_selector,
         gdt::GDT.1.kernel_data_selector,
-    )?;
+    )
+    .map_err(|_| "invalid syscall segment selectors")?;
 
     // syscall 呼び出し時に IF をクリアさせる
     SFMask::write(x86_64::registers::rflags::RFlags::INTERRUPT_FLAG);
@@ -161,14 +162,15 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
         .lock()
         .expect("physical memory offset not initialized");
     let pml4 = unsafe {
-        &mut *(crate::memory::va::phys_to_virt(process_page_table.start_address(), physical_memory_offset)
-            .as_mut_ptr::<x86_64::structures::paging::PageTable>())
+        &mut *(crate::memory::va::phys_to_virt(
+            process_page_table.start_address(),
+            physical_memory_offset,
+        )
+        .as_mut_ptr::<x86_64::structures::paging::PageTable>())
     };
 
     let mut guard = crate::memory::FRAME_ALLOCATOR.lock();
-    let frame_allocator = guard
-        .as_mut()
-        .expect("FRAME_ALLOCATOR not initialized");
+    let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
 
     let mut bytes = Vec::with_capacity(len);
     let mut copied = 0usize;
@@ -191,10 +193,16 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
             "syscall: address is not mapped"
         })?;
 
-        if !pte.flags().contains(x86_64::structures::paging::PageTableFlags::PRESENT) {
+        if !pte
+            .flags()
+            .contains(x86_64::structures::paging::PageTableFlags::PRESENT)
+        {
             return Err("syscall: address is not present");
         }
-        if !pte.flags().contains(x86_64::structures::paging::PageTableFlags::USER_ACCESSIBLE) {
+        if !pte
+            .flags()
+            .contains(x86_64::structures::paging::PageTableFlags::USER_ACCESSIBLE)
+        {
             return Err("syscall: address is not user-accessible");
         }
 
@@ -213,7 +221,6 @@ fn copy_bytes_from_user(ptr: u64, len: usize) -> Result<Vec<u8>, &'static str> {
 
     Ok(bytes)
 }
-
 
 /// kernel から user にバイナリをコピー
 fn copy_to_user(ptr: abi::UserAddress, bytes: &[u8]) -> Result<(), &'static str> {
@@ -236,14 +243,15 @@ fn copy_to_user(ptr: abi::UserAddress, bytes: &[u8]) -> Result<(), &'static str>
         .lock()
         .expect("physical memory offset not initialized");
     let pml4 = unsafe {
-        &mut *(crate::memory::va::phys_to_virt(process_page_table.start_address(), physical_memory_offset)
-            .as_mut_ptr::<x86_64::structures::paging::PageTable>())
+        &mut *(crate::memory::va::phys_to_virt(
+            process_page_table.start_address(),
+            physical_memory_offset,
+        )
+        .as_mut_ptr::<x86_64::structures::paging::PageTable>())
     };
 
     let mut guard = crate::memory::FRAME_ALLOCATOR.lock();
-    let frame_allocator = guard
-        .as_mut()
-        .expect("FRAME_ALLOCATOR not initialized");
+    let frame_allocator = guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
 
     let mut copied = 0usize;
     while copied < bytes.len() {

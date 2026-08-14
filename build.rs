@@ -251,6 +251,7 @@ fn emit_rerun_instructions(kernel_manifest: &Path, apps: &[AppBuild]) {
     println!("cargo:rerun-if-changed=x86_64-ferrios.json");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEBUG_MODE");
     println!("cargo:rerun-if-env-changed=FERRIOS_BUILD_KERNEL_TESTS");
+    println!("cargo:rerun-if-env-changed=FERRIOS_KERNEL_TEST_RUN_ID");
 }
 
 fn main() {

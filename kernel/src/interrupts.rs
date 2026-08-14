@@ -1,12 +1,12 @@
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use crate::gdt;
+use crate::hlt_loop;
+use crate::println;
+use crate::scheduler;
+use crate::syscall;
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::{self, Mutex};
-use crate::println;
-use crate::gdt;
-use crate::hlt_loop;
-use crate::scheduler;
-use crate::syscall;
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 const PIT_BASE_FREQUENCY: u32 = 1_193_182;
 pub const TIMER_FREQUENCY_HZ: u32 = 100;
@@ -19,11 +19,13 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         unsafe {
-            idt.double_fault.set_handler_fn(double_fault_handler).set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX)
+            idt.double_fault
+                .set_handler_fn(double_fault_handler)
+                .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX)
         };
-        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
-        idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
-        idt[InterruptIndex::Serial.as_usize()].set_handler_fn(serial_interrupt_handler);
+        idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Serial.as_u8()].set_handler_fn(serial_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
 
         idt
@@ -66,12 +68,18 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
 }
 
 /// ダブルフォルト例外ハンドラ
-extern "x86-interrupt" fn double_fault_handler(stack_frame: InterruptStackFrame, _error_code: u64) -> ! {
+extern "x86-interrupt" fn double_fault_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) -> ! {
     panic!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 }
 
 /// ページフォルトハンドラ
-extern "x86-interrupt" fn page_fault_handler(stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode) {
+extern "x86-interrupt" fn page_fault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: PageFaultErrorCode,
+) {
     use x86_64::registers::control::Cr2;
 
     println!("EXCEPTION: PAGE FAULT");
@@ -84,13 +92,14 @@ extern "x86-interrupt" fn page_fault_handler(stack_frame: InterruptStackFrame, e
 /// タイマ割り込みハンドラ
 extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFrame) {
     unsafe {
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
 
     // TICKS をカウントアップ
     countup_ticks();
-    
-    let from_user = stack_frame.code_segment & 0b11 == 3;
+
+    let from_user = stack_frame.code_segment.0 & 0b11 == 3;
 
     if from_user {
         syscall::exit_if_current_process_killed();
@@ -99,7 +108,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
     #[cfg(feature = "debug_mode")]
     {
         // CS の下位2ビットが CPL（現在の特権レベル）
-        let cpl = stack_frame.code_segment & 0b11;
+        let cpl = stack_frame.code_segment.0 & 0b11;
 
         if cpl == 3 {
             let cpu = crate::cpu::CPU.lock();
@@ -126,15 +135,14 @@ extern "x86-interrupt" fn timer_interrupt_handler(stack_frame: InterruptStackFra
 /// キーボード割り込みハンドラ
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
-    
+
     let mut port = Port::new(0x60);
-    let scancode: u8 = unsafe {
-        port.read()
-    };
+    let scancode: u8 = unsafe { port.read() };
     crate::task::keyboard::add_scancode(scancode);
 
     unsafe {
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
 }
 
@@ -143,15 +151,14 @@ extern "x86-interrupt" fn serial_interrupt_handler(_stack_frame: InterruptStackF
     use x86_64::instructions::port::Port;
 
     let mut port = Port::new(0x3F8);
-    let byte: u8 = unsafe {
-        port.read()
-    };
+    let byte: u8 = unsafe { port.read() };
 
     // キーボードタスクに渡す
     crate::task::serial_input::add_byte(byte);
 
     unsafe {
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Serial.as_u8());
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Serial.as_u8());
     }
 }
 
@@ -159,25 +166,19 @@ extern "x86-interrupt" fn serial_interrupt_handler(_stack_frame: InterruptStackF
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 // PIC の offset は 32 ~ 47 にマップ
-pub static PICS: spin::Mutex<ChainedPics> = spin::Mutex::new(
-    unsafe { 
-        ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) 
-    }
-);
+pub static PICS: spin::Mutex<ChainedPics> =
+    spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
-    Serial = PIC_1_OFFSET + 4,  // COM1, IRQ4
+    Serial = PIC_1_OFFSET + 4, // COM1, IRQ4
 }
 impl InterruptIndex {
     fn as_u8(self) -> u8 {
         self as u8
-    }
-    fn as_usize(self) -> usize {
-        usize::from(self.as_u8())
     }
 }
 
@@ -189,6 +190,6 @@ fn test_breakpoint_exception() {
 
 #[test_case]
 fn check_interrupt_indexes() {
-    assert!(InterruptIndex::Timer.as_usize() == 32);
-    assert!(InterruptIndex::Keyboard.as_usize() == 33);
+    assert_eq!(usize::from(InterruptIndex::Timer.as_u8()), 32);
+    assert_eq!(usize::from(InterruptIndex::Keyboard.as_u8()), 33);
 }

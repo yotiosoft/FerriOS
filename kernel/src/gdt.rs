@@ -1,8 +1,8 @@
-use x86_64::VirtAddr;
-use x86_64::registers::segmentation::Segment;
-use x86_64::structures::tss::TaskStateSegment;
-use x86_64::structures::gdt::{GlobalDescriptorTable, Descriptor, SegmentSelector};
 use lazy_static::lazy_static;
+use x86_64::registers::segmentation::Segment;
+use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
+use x86_64::structures::tss::TaskStateSegment;
+use x86_64::VirtAddr;
 
 use crate::memory;
 
@@ -11,23 +11,23 @@ pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
-        
+
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
             static mut STACK: [u8; memory::STACK_SIZE] = [0; memory::STACK_SIZE];
 
             let stack_start = VirtAddr::from_ptr(&raw const STACK);
-            let stack_end = stack_start + memory::STACK_SIZE;
+            let stack_end = stack_start + memory::STACK_SIZE as u64;
             stack_end
         };
-        
+
         tss.privilege_stack_table[0] = {
             static mut STACK: [u8; memory::STACK_SIZE] = [0; memory::STACK_SIZE];
 
             let stack_start = VirtAddr::from_ptr(&raw const STACK);
-            let stack_end = stack_start + memory::STACK_SIZE;
+            let stack_end = stack_start + memory::STACK_SIZE as u64;
             stack_end
         };
-        
+
         tss
     };
 }
@@ -43,12 +43,21 @@ pub struct Selectors {
 lazy_static! {
     pub static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
-        let kernel_code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
-        let kernel_data_selector = gdt.add_entry(Descriptor::kernel_data_segment());
-        let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
-        let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
-        let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
-        (gdt, Selectors { kernel_code_selector, kernel_data_selector, user_code_selector, user_data_selector, tss_selector })
+        let kernel_code_selector = gdt.append(Descriptor::kernel_code_segment());
+        let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
+        let user_data_selector = gdt.append(Descriptor::user_data_segment());
+        let user_code_selector = gdt.append(Descriptor::user_code_segment());
+        let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
+        (
+            gdt,
+            Selectors {
+                kernel_code_selector,
+                kernel_data_selector,
+                user_code_selector,
+                user_data_selector,
+                tss_selector,
+            },
+        )
     };
 }
 
@@ -56,10 +65,10 @@ pub fn init() {
     use x86_64::instructions::segmentation::CS;
     use x86_64::instructions::tables::load_tss;
 
-    GDT.0.load();                       // GlobalDescriptorTable
+    GDT.0.load(); // GlobalDescriptorTable
     unsafe {
-        CS::set_reg(GDT.1.kernel_code_selector);    // Code Selector
-        load_tss(GDT.1.tss_selector);   // Task State Segment Selector
+        CS::set_reg(GDT.1.kernel_code_selector); // Code Selector
+        load_tss(GDT.1.tss_selector); // Task State Segment Selector
     }
 }
 
