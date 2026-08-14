@@ -2,7 +2,7 @@ use core::array;
 
 use spin::{Mutex, MutexGuard};
 
-use super::block::{self, BLOCK_SIZE, BlockDevice, BlockError};
+use super::block::{self, BlockDevice, BlockError, BLOCK_SIZE};
 
 pub const NBUF: usize = 16;
 
@@ -62,6 +62,10 @@ impl<D: BlockDevice, const N: usize> BufferCache<D, N> {
                 data: Mutex::new([0; BLOCK_SIZE]),
             }),
         }
+    }
+
+    pub fn device_blocks(&self) -> u64 {
+        self.device.num_blocks()
     }
 
     /// バッファ読み込み
@@ -134,7 +138,12 @@ impl<D: BlockDevice, const N: usize> BufferCache<D, N> {
 
     /// バッファ書き込み
     /// data バイナリを index で指定したデバイスの block_no に書き込む
-    fn write(&self, index: usize, block_no: u64, data: &[u8; BLOCK_SIZE]) -> Result<(), BufferError> {
+    fn write(
+        &self,
+        index: usize,
+        block_no: u64,
+        data: &[u8; BLOCK_SIZE],
+    ) -> Result<(), BufferError> {
         self.mark_dirty(index, block_no)?;
         self.device.write_block(block_no, data)?;
 

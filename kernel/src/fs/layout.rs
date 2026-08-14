@@ -25,6 +25,15 @@ pub struct SuperBlock {
 }
 
 impl SuperBlock {
+    pub fn from_block_bytes(block: &[u8; BLOCK_SIZE]) -> Self {
+        Self {
+            size: read_u32_le(block, 0),
+            nblocks: read_u32_le(block, 4),
+            ninodes: read_u32_le(block, 8),
+            nlog: read_u32_le(block, 12),
+        }
+    }
+
     pub fn inode_blocks(&self) -> u32 {
         self.ninodes / IPB as u32 + 1
     }
@@ -82,6 +91,15 @@ pub const fn bitmap_index_in_block(block_no: u32) -> usize {
 
 pub const fn bitmap_mask(block_no: u32) -> u8 {
     1 << ((block_no as usize) % 8)
+}
+
+const fn read_u32_le(block: &[u8; BLOCK_SIZE], offset: usize) -> u32 {
+    u32::from_le_bytes([
+        block[offset],
+        block[offset + 1],
+        block[offset + 2],
+        block[offset + 3],
+    ])
 }
 
 #[cfg(test)]
@@ -159,6 +177,25 @@ mod tests {
             bitmap_block(0, superblock.ninodes)
         );
         assert_eq!(superblock.data_start(), superblock.bitmap_start() + 2);
+    }
+
+    #[test_case]
+    fn superblock_decodes_from_little_endian_block() {
+        let mut block = [0u8; BLOCK_SIZE];
+        block[0..4].copy_from_slice(&64u32.to_le_bytes());
+        block[4..8].copy_from_slice(&54u32.to_le_bytes());
+        block[8..12].copy_from_slice(&16u32.to_le_bytes());
+        block[12..16].copy_from_slice(&0u32.to_le_bytes());
+
+        assert_eq!(
+            SuperBlock::from_block_bytes(&block),
+            SuperBlock {
+                size: 64,
+                nblocks: 54,
+                ninodes: 16,
+                nlog: 0,
+            }
+        );
     }
 
     #[test_case]
