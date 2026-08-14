@@ -77,7 +77,11 @@ fn discover_kernel_test_executables(target_dir: &Path, profile_dir: &str) -> Vec
     let deps_dir = target_dir.join(format!("x86_64-unknown-none/{profile_dir}/deps"));
     let mut tests = Vec::new();
 
-    for entry in fs::read_dir(&deps_dir).expect("failed to read kernel test deps dir") {
+    let Ok(entries) = fs::read_dir(&deps_dir) else {
+        return tests;
+    };
+
+    for entry in entries {
         let entry = entry.expect("failed to read kernel test artifact");
         let path = entry.path();
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
@@ -90,6 +94,51 @@ fn discover_kernel_test_executables(target_dir: &Path, profile_dir: &str) -> Vec
     }
 
     tests.sort();
+    tests
+}
+
+fn kernel_test_executables_from_cargo_json(output: &str) -> Vec<PathBuf> {
+    let mut tests = Vec::new();
+
+    for line in output.lines() {
+        let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+
+        if message.get("reason").and_then(|reason| reason.as_str()) == Some("compiler-message") {
+            if let Some(rendered) = message
+                .get("message")
+                .and_then(|message| message.get("rendered"))
+                .and_then(|rendered| rendered.as_str())
+            {
+                eprint!("{rendered}");
+            }
+            continue;
+        }
+
+        if message.get("reason").and_then(|reason| reason.as_str()) != Some("compiler-artifact") {
+            continue;
+        }
+        if !message
+            .get("target")
+            .and_then(|target| target.get("kind"))
+            .and_then(|kind| kind.as_array())
+            .is_some_and(|kind| kind.iter().any(|kind| kind.as_str() == Some("test")))
+        {
+            continue;
+        }
+        let Some(executable) = message
+            .get("executable")
+            .and_then(|executable| executable.as_str())
+        else {
+            continue;
+        };
+
+        tests.push(PathBuf::from(executable));
+    }
+
+    tests.sort();
+    tests.dedup();
     tests
 }
 
@@ -116,6 +165,7 @@ fn build_kernel_tests(
         "-Zpanic-abort-tests".to_string(),
         "--no-run".to_string(),
         "--lib".to_string(),
+        "--message-format=json".to_string(),
     ];
     if is_release {
         args.push("--release".to_string());
@@ -125,14 +175,18 @@ fn build_kernel_tests(
         args.push("debug_mode".to_string());
     }
 
-    let status = Command::new("cargo")
+    let output = Command::new("cargo")
         .env("USER_APPS_MANIFEST", apps_manifest)
         .env_remove("CARGO_TARGET_DIR")
         .args(&args)
-        .status()
+        .output()
         .expect("failed to build kernel tests");
 
-    assert!(status.success(), "kernel test build failed");
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut test_executables = kernel_test_executables_from_cargo_json(&stdout);
+
+    assert!(output.status.success(), "kernel test build failed");
 
     let image_dir = out_dir.join("kernel-tests");
     if image_dir.exists() {
@@ -140,7 +194,9 @@ fn build_kernel_tests(
     }
     fs::create_dir_all(&image_dir).expect("failed to create kernel test image dir");
 
-    let test_executables = discover_kernel_test_executables(&target_dir, profile_dir);
+    if test_executables.is_empty() {
+        test_executables = discover_kernel_test_executables(&target_dir, profile_dir);
+    }
     assert!(
         !test_executables.is_empty(),
         "kernel test build produced no test executables"
