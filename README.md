@@ -10,32 +10,33 @@ FerriOS starts where blog_os leaves off. Taking blog_os as its foundation and [x
 
 **Note:** FerriOS is a personal hobby project and is not intended as a learning resource or tutorial. While the code is publicly available, please keep in mind that it comes with no guarantees of correctness, completeness, or instructional value.
 
-# 準備
+# Preparation
 
-nightly の設定、rust-src のインストール
+Install nightly toolchain, rust-src, and llvm-tools-preview
+
 ```bash
+$ rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools-preview --target x86_64-unknown-none
 $ rustup override set nightly
-$ rustup component add rust-src
 ```
 
-bootimage のインストール
+Install llvm-tools-preview component
+
 ```bash
 $ rustup component add llvm-tools-preview
-$ cargo install bootimage
 ```
 
-# ビルド
+# Build
 ```bash
-$ cargo bootimage
+$ cargo build --release
 ```
 
-# 起動
-GUI で起動
+# Run
+Run in QEMU with graphical output
 ```bash
-$ ./run.sh
+$ cargo run --release
 ```
 
-CUI で起動
+Run in QEMU with no graphical output (serial console only)
 ```bash
-$ ./run.sh -nographic -serial mon:stdio
+$ cargo run --release -- --nographic
 ```
