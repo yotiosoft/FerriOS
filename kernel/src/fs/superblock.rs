@@ -14,6 +14,13 @@ pub enum FsError {
     BlockOutOfRange,
     DoubleFree,
     NoSpace,
+    InvalidInode,
+    InodeOutOfRange,
+    NoFreeInode,
+    InodeNotAllocated,
+    InvalidInodeType,
+    InodeRefOverflow,
+    CorruptImage,
 }
 
 impl From<BufferError> for FsError {

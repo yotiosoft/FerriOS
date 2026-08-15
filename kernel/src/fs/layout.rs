@@ -66,6 +66,60 @@ pub struct DiskInode {
     pub addrs: [u32; NDIRECT + 3],
 }
 
+impl DiskInode {
+    pub const ENCODED_SIZE: usize = 64;
+
+    pub const fn empty() -> Self {
+        Self {
+            type_: T_NONE,
+            major: 0,
+            minor: 0,
+            nlink: 0,
+            size: 0,
+            addrs: [0; NDIRECT + 3],
+        }
+    }
+
+    /// Decode an inode without relying on host alignment or endianness.
+    pub fn decode_from(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < Self::ENCODED_SIZE {
+            return None;
+        }
+
+        let mut addrs = [0; NDIRECT + 3];
+        for (index, addr) in addrs.iter_mut().enumerate() {
+            *addr = read_u32_le_slice(bytes, 12 + index * 4);
+        }
+
+        Some(Self {
+            type_: read_u16_le(bytes, 0),
+            major: read_u16_le(bytes, 2),
+            minor: read_u16_le(bytes, 4),
+            nlink: read_u16_le(bytes, 6),
+            size: read_u32_le_slice(bytes, 8),
+            addrs,
+        })
+    }
+
+    /// Encode an inode without using an unsafe cast to the on-disk block.
+    pub fn encode_into(&self, bytes: &mut [u8]) -> bool {
+        if bytes.len() < Self::ENCODED_SIZE {
+            return false;
+        }
+
+        bytes[..Self::ENCODED_SIZE].fill(0);
+        write_u16_le(bytes, 0, self.type_);
+        write_u16_le(bytes, 2, self.major);
+        write_u16_le(bytes, 4, self.minor);
+        write_u16_le(bytes, 6, self.nlink);
+        write_u32_le(bytes, 8, self.size);
+        for (index, addr) in self.addrs.iter().enumerate() {
+            write_u32_le(bytes, 12 + index * 4, *addr);
+        }
+        true
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirEntry {
@@ -102,6 +156,27 @@ const fn read_u32_le(block: &[u8; BLOCK_SIZE], offset: usize) -> u32 {
     ])
 }
 
+fn read_u16_le(bytes: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+}
+
+fn read_u32_le_slice(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
+}
+
+fn write_u16_le(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_u32_le(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +185,25 @@ mod tests {
     fn disk_inode_size_check() {
         assert_eq!(core::mem::size_of::<DiskInode>(), 64);
         assert_eq!(core::mem::align_of::<DiskInode>(), 4);
+    }
+
+    #[test_case]
+    fn disk_inode_codec_is_little_endian_and_round_trips() {
+        let inode = DiskInode {
+            type_: T_FILE,
+            major: 0x1122,
+            minor: 0x3344,
+            nlink: 3,
+            size: 0x5566_7788,
+            addrs: core::array::from_fn(|index| index as u32 + 10),
+        };
+        let mut bytes = [0u8; DiskInode::ENCODED_SIZE];
+
+        assert!(inode.encode_into(&mut bytes));
+        assert_eq!(&bytes[0..2], &T_FILE.to_le_bytes());
+        assert_eq!(&bytes[8..12], &0x5566_7788u32.to_le_bytes());
+        assert_eq!(DiskInode::decode_from(&bytes), Some(inode));
+        assert_eq!(DiskInode::decode_from(&bytes[..63]), None);
     }
 
     #[test_case]

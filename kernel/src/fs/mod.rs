@@ -1,5 +1,6 @@
 pub mod bcache;
 pub mod block;
+pub mod inode;
 pub mod layout;
 pub mod superblock;
 
