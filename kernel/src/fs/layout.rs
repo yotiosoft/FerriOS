@@ -3,7 +3,7 @@ use super::block::BLOCK_SIZE;
 pub const ROOT_INO: u32 = 1;
 pub const NDIRECT: usize = 10;
 pub const NINDIRECT: usize = BLOCK_SIZE / core::mem::size_of::<u32>();
-pub const MAXFILE: usize = NDIRECT + NINDIRECT * NINDIRECT * NINDIRECT;
+pub const MAXFILE: usize = NDIRECT + NINDIRECT;
 pub const DIRSIZ: usize = 14;
 pub const IPB: usize = BLOCK_SIZE / core::mem::size_of::<DiskInode>();
 pub const BPB: usize = BLOCK_SIZE * 8;
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(IPB, BLOCK_SIZE / core::mem::size_of::<DiskInode>());
         assert_eq!(BPB, BLOCK_SIZE * 8);
         assert_eq!(NINDIRECT, 128);
-        assert_eq!(MAXFILE, NDIRECT + NINDIRECT * NINDIRECT * NINDIRECT);
+        assert_eq!(MAXFILE, NDIRECT + NINDIRECT);
     }
 
     #[test_case]

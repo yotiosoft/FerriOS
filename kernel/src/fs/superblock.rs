@@ -1,7 +1,7 @@
 use super::{
     bcache::{BufferCache, BufferError},
     block::BlockDevice,
-    layout::{bitmap_block, bitmap_index_in_block, bitmap_mask, SuperBlock, BPB},
+    layout::{BPB, SuperBlock, bitmap_block, bitmap_index_in_block, bitmap_mask},
 };
 
 pub const SUPERBLOCK_BLOCK: u64 = 1;
@@ -20,6 +20,9 @@ pub enum FsError {
     InodeNotAllocated,
     InvalidInodeType,
     InodeRefOverflow,
+    FileTooLarge,
+    OutOfRange,
+    Unsupported,
     CorruptImage,
 }
 
@@ -72,8 +75,8 @@ impl<'a, D: BlockDevice, const N: usize> FileSystem<'a, D, N> {
             }
 
             if let Some(allocated) = allocated {
-                // xv6 logs this sequence. FerriOS does the same write order now so
-                // a future journal can wrap these mutations without changing callers.
+                // Persist allocation metadata before clearing the new block so a
+                // future journal can wrap the same write order.
                 self.zero_block(allocated)?;
                 return Ok(allocated);
             }
@@ -180,7 +183,7 @@ mod tests {
     use spin::Mutex;
 
     use super::*;
-    use crate::fs::block::{BlockError, BLOCK_SIZE};
+    use crate::fs::block::{BLOCK_SIZE, BlockError};
 
     const TEST_BLOCKS: usize = 64;
     const TEST_NINODES: u32 = 16;

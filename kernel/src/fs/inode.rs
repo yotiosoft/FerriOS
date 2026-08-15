@@ -7,8 +7,11 @@ use spin::{Mutex, MutexGuard};
 
 use super::{
     bcache::BufferCache,
-    block::BlockDevice,
-    layout::{DiskInode, NDIRECT, SuperBlock, T_NONE, inode_block, inode_index_in_block},
+    block::{BLOCK_SIZE, BlockDevice},
+    layout::{
+        DiskInode, MAXFILE, NDIRECT, NINDIRECT, SuperBlock, T_DEV, T_DIR, T_FILE, T_NONE,
+        inode_block, inode_index_in_block,
+    },
     superblock::FsError,
 };
 
@@ -74,7 +77,7 @@ struct CacheEntry {
     inode: Mutex<Inode>,
 }
 
-/// Fixed-size xv6-style inode cache.
+/// Fixed-size inode cache.
 ///
 /// Lock order is cache metadata, then an inode entry, then the buffer cache.
 /// No operation holds the metadata lock while acquiring either later lock.
@@ -99,7 +102,7 @@ impl<'a, D: BlockDevice, const B: usize, const I: usize> InodeCache<'a, D, B, I>
         }
     }
 
-    /// xv6 `iget`: acquire a cache reference without reading the inode block.
+    /// `iget`: acquire a cache reference without reading the inode block.
     pub fn iget(&self, inum: u32) -> Result<InodeRef<'_, 'a, D, B, I>, FsError> {
         self.check_inum(inum)?;
 
@@ -134,7 +137,7 @@ impl<'a, D: BlockDevice, const B: usize, const I: usize> InodeCache<'a, D, B, I>
         })
     }
 
-    /// xv6 `ialloc`: allocate an on-disk inode and return it unlocked.
+    /// `ialloc`: allocate an on-disk inode and return it unlocked.
     pub fn ialloc(&self, type_: u16) -> Result<InodeRef<'_, 'a, D, B, I>, FsError> {
         if type_ == T_NONE {
             return Err(FsError::InvalidInodeType);
@@ -257,7 +260,7 @@ impl<D: BlockDevice, const B: usize, const I: usize> LockedInode<'_, '_, D, B, I
         self.inum
     }
 
-    /// xv6 `iupdate`: write the locked in-memory inode to its disk slot.
+    /// `iupdate`: write the locked in-memory inode to its disk slot.
     pub fn update(&mut self) -> Result<(), FsError> {
         let mut block = self.cache.buffers.bread(inode_block(self.inum) as u64)?;
         let range = inode_byte_range(self.inum)?;
@@ -269,6 +272,99 @@ impl<D: BlockDevice, const B: usize, const I: usize> LockedInode<'_, '_, D, B, I
             return Err(FsError::CorruptImage);
         }
         block.write()?;
+        Ok(())
+    }
+
+    /// Resolve a file-relative block without allocating storage.
+    pub fn bmap_readonly(&self, logical_bn: u32) -> Result<Option<u32>, FsError> {
+        let logical_bn = usize::try_from(logical_bn).map_err(|_| FsError::OutOfRange)?;
+        if logical_bn >= MAXFILE {
+            return Err(FsError::FileTooLarge);
+        }
+
+        if logical_bn < NDIRECT {
+            return self.validate_data_address(self.addrs[logical_bn]);
+        }
+
+        let indirect_bn = self.addrs[NDIRECT];
+        if indirect_bn == 0 {
+            return Ok(None);
+        }
+        self.validate_block_number(indirect_bn)?;
+
+        let indirect_index = logical_bn - NDIRECT;
+        if indirect_index >= NINDIRECT {
+            return Err(FsError::FileTooLarge);
+        }
+        let byte_offset = indirect_index
+            .checked_mul(core::mem::size_of::<u32>())
+            .ok_or(FsError::OutOfRange)?;
+        let byte_end = byte_offset
+            .checked_add(core::mem::size_of::<u32>())
+            .ok_or(FsError::OutOfRange)?;
+        let block = self.cache.buffers.bread(indirect_bn as u64)?;
+        let bytes: [u8; 4] = block.data()[byte_offset..byte_end]
+            .try_into()
+            .map_err(|_| FsError::CorruptImage)?;
+        self.validate_data_address(u32::from_le_bytes(bytes))
+    }
+
+    /// Read file or directory bytes starting at `offset`.
+    pub fn read_at(&self, dst: &mut [u8], offset: u32) -> Result<usize, FsError> {
+        match self.type_ {
+            T_FILE | T_DIR => {}
+            T_DEV => return Err(FsError::Unsupported),
+            _ => return Err(FsError::InvalidInodeType),
+        }
+
+        let max_size = MAXFILE.checked_mul(BLOCK_SIZE).ok_or(FsError::OutOfRange)?;
+        let file_size = usize::try_from(self.size).map_err(|_| FsError::OutOfRange)?;
+        if file_size > max_size {
+            return Err(FsError::CorruptImage);
+        }
+
+        let offset = usize::try_from(offset).map_err(|_| FsError::OutOfRange)?;
+        let requested_end = offset.checked_add(dst.len()).ok_or(FsError::OutOfRange)?;
+        if dst.is_empty() || offset >= file_size {
+            return Ok(0);
+        }
+        let end = requested_end.min(file_size);
+        let read_len = end.checked_sub(offset).ok_or(FsError::OutOfRange)?;
+        let mut copied = 0usize;
+
+        while copied < read_len {
+            let position = offset.checked_add(copied).ok_or(FsError::OutOfRange)?;
+            let logical_bn =
+                u32::try_from(position / BLOCK_SIZE).map_err(|_| FsError::OutOfRange)?;
+            let block_offset = position % BLOCK_SIZE;
+            let chunk_len = (BLOCK_SIZE - block_offset).min(read_len - copied);
+
+            match self.bmap_readonly(logical_bn)? {
+                Some(block_no) => {
+                    let block = self.cache.buffers.bread(block_no as u64)?;
+                    dst[copied..copied + chunk_len]
+                        .copy_from_slice(&block.data()[block_offset..block_offset + chunk_len]);
+                }
+                None => dst[copied..copied + chunk_len].fill(0),
+            }
+            copied = copied.checked_add(chunk_len).ok_or(FsError::OutOfRange)?;
+        }
+
+        Ok(copied)
+    }
+
+    fn validate_data_address(&self, block_no: u32) -> Result<Option<u32>, FsError> {
+        if block_no == 0 {
+            return Ok(None);
+        }
+        self.validate_block_number(block_no)?;
+        Ok(Some(block_no))
+    }
+
+    fn validate_block_number(&self, block_no: u32) -> Result<(), FsError> {
+        if block_no >= self.cache.sb.size {
+            return Err(FsError::CorruptImage);
+        }
         Ok(())
     }
 }
@@ -306,7 +402,7 @@ mod tests {
         layout::{T_DIR, T_FILE},
     };
 
-    const BLOCKS: usize = 16;
+    const BLOCKS: usize = 32;
     const BUFFERS: usize = 4;
     static READS: AtomicUsize = AtomicUsize::new(0);
 
@@ -327,6 +423,14 @@ mod tests {
             let mut blocks = self.blocks.lock();
             let range = inode_byte_range(inum).expect("inode range");
             assert!(inode.encode_into(&mut blocks[inode_block(inum) as usize][range]));
+        }
+
+        fn put_block(&self, block_no: u32, data: &[u8]) {
+            assert!(data.len() <= BLOCK_SIZE);
+            let mut blocks = self.blocks.lock();
+            let block = &mut blocks[block_no as usize];
+            block.fill(0);
+            block[..data.len()].copy_from_slice(data);
         }
     }
 
@@ -360,7 +464,7 @@ mod tests {
     fn superblock() -> SuperBlock {
         SuperBlock {
             size: BLOCKS as u32,
-            nblocks: 10,
+            nblocks: 24,
             ninodes: 8,
             nlog: 0,
         }
@@ -374,6 +478,17 @@ mod tests {
             nlink: 1,
             size: 123,
             addrs: core::array::from_fn(|index| index as u32 + 20),
+        }
+    }
+
+    fn file_inode(size: usize, addrs: [u32; NDIRECT + 3]) -> DiskInode {
+        DiskInode {
+            type_: T_FILE,
+            major: 0,
+            minor: 0,
+            nlink: 1,
+            size: u32::try_from(size).expect("file size"),
+            addrs,
         }
     }
 
@@ -486,5 +601,157 @@ mod tests {
             cache.ialloc(T_NONE),
             Err(FsError::InvalidInodeType)
         ));
+    }
+
+    #[test_case]
+    fn read_at_handles_offsets_block_boundaries_and_eof() {
+        let device = TestDevice::new();
+        let first = core::array::from_fn::<_, BLOCK_SIZE, _>(|index| (index % 251) as u8);
+        let second = [0xa5; BLOCK_SIZE];
+        device.put_block(10, &first);
+        device.put_block(11, &second);
+        let mut addrs = [0; NDIRECT + 3];
+        addrs[0] = 10;
+        addrs[1] = 11;
+        device.put_inode(1, file_inode(BLOCK_SIZE + 16, addrs));
+
+        let buffers = BufferCache::<_, BUFFERS>::new(device);
+        let cache = InodeCache::<_, BUFFERS, 2>::new(&buffers, superblock());
+        let inode_ref = cache.iget(1).expect("iget");
+        let inode = inode_ref.lock().expect("lock");
+
+        let mut start = [0; 8];
+        assert_eq!(inode.read_at(&mut start, 0), Ok(8));
+        assert_eq!(start, first[..8]);
+
+        let mut middle = [0; 7];
+        assert_eq!(inode.read_at(&mut middle, 37), Ok(7));
+        assert_eq!(middle, first[37..44]);
+
+        let mut crossing = [0; 8];
+        assert_eq!(inode.read_at(&mut crossing, (BLOCK_SIZE - 4) as u32), Ok(8));
+        assert_eq!(&crossing[..4], &first[BLOCK_SIZE - 4..]);
+        assert_eq!(&crossing[4..], &[0xa5; 4]);
+
+        let mut beyond_eof = [0xcc; 20];
+        assert_eq!(
+            inode.read_at(&mut beyond_eof, (BLOCK_SIZE + 10) as u32),
+            Ok(6)
+        );
+        assert_eq!(&beyond_eof[..6], &[0xa5; 6]);
+        assert_eq!(&beyond_eof[6..], &[0xcc; 14]);
+        assert_eq!(
+            inode.read_at(&mut beyond_eof, (BLOCK_SIZE + 16) as u32),
+            Ok(0)
+        );
+        assert_eq!(
+            inode.read_at(&mut beyond_eof, (BLOCK_SIZE + 17) as u32),
+            Ok(0)
+        );
+        assert_eq!(inode.read_at(&mut [], 0), Ok(0));
+    }
+
+    #[test_case]
+    fn read_at_zero_fills_holes() {
+        let device = TestDevice::new();
+        device.put_inode(1, file_inode(24, [0; NDIRECT + 3]));
+        let buffers = BufferCache::<_, BUFFERS>::new(device);
+        let cache = InodeCache::<_, BUFFERS, 2>::new(&buffers, superblock());
+        let inode_ref = cache.iget(1).expect("iget");
+        let inode = inode_ref.lock().expect("lock");
+        let mut bytes = [0xff; 24];
+
+        assert_eq!(inode.read_at(&mut bytes, 0), Ok(24));
+        assert_eq!(bytes, [0; 24]);
+        assert_eq!(inode.bmap_readonly(0), Ok(None));
+        assert_eq!(inode.bmap_readonly(NDIRECT as u32), Ok(None));
+    }
+
+    #[test_case]
+    fn read_at_follows_indirect_blocks_across_the_direct_boundary() {
+        let device = TestDevice::new();
+        device.put_block(10, &[1; BLOCK_SIZE]);
+        device.put_block(12, &[2; BLOCK_SIZE]);
+        let mut indirect = [0; BLOCK_SIZE];
+        indirect[..4].copy_from_slice(&12u32.to_le_bytes());
+        device.put_block(11, &indirect);
+        let mut addrs = [0; NDIRECT + 3];
+        addrs[NDIRECT - 1] = 10;
+        addrs[NDIRECT] = 11;
+        device.put_inode(1, file_inode((NDIRECT + 1) * BLOCK_SIZE, addrs));
+
+        let buffers = BufferCache::<_, BUFFERS>::new(device);
+        let cache = InodeCache::<_, BUFFERS, 2>::new(&buffers, superblock());
+        let inode_ref = cache.iget(1).expect("iget");
+        let inode = inode_ref.lock().expect("lock");
+        let mut bytes = [0; 8];
+
+        assert_eq!(inode.bmap_readonly(NDIRECT as u32), Ok(Some(12)));
+        assert_eq!(
+            inode.read_at(&mut bytes, (NDIRECT * BLOCK_SIZE - 4) as u32),
+            Ok(8)
+        );
+        assert_eq!(&bytes[..4], &[1; 4]);
+        assert_eq!(&bytes[4..], &[2; 4]);
+    }
+
+    #[test_case]
+    fn read_path_rejects_out_of_range_blocks_and_sizes() {
+        let device = TestDevice::new();
+        let mut indirect = [0; BLOCK_SIZE];
+        indirect[..4].copy_from_slice(&(BLOCKS as u32).to_le_bytes());
+        device.put_block(10, &indirect);
+        device.put_inode(1, file_inode(1, [0; NDIRECT + 3]));
+        let buffers = BufferCache::<_, BUFFERS>::new(device);
+        let cache = InodeCache::<_, BUFFERS, 2>::new(&buffers, superblock());
+        let inode_ref = cache.iget(1).expect("iget");
+        let mut inode = inode_ref.lock().expect("lock");
+
+        assert_eq!(
+            inode.bmap_readonly(MAXFILE as u32),
+            Err(FsError::FileTooLarge)
+        );
+        inode.addrs[0] = BLOCKS as u32;
+        assert_eq!(inode.bmap_readonly(0), Err(FsError::CorruptImage));
+        inode.addrs[0] = 0;
+        inode.addrs[NDIRECT] = BLOCKS as u32;
+        assert_eq!(
+            inode.bmap_readonly(NDIRECT as u32),
+            Err(FsError::CorruptImage)
+        );
+        inode.addrs[NDIRECT] = 10;
+        assert_eq!(
+            inode.bmap_readonly(NDIRECT as u32),
+            Err(FsError::CorruptImage)
+        );
+
+        inode.size = (MAXFILE * BLOCK_SIZE + 1) as u32;
+        assert_eq!(inode.read_at(&mut [0; 1], 0), Err(FsError::CorruptImage));
+    }
+
+    #[test_case]
+    fn read_at_supports_directories_but_not_devices() {
+        let device = TestDevice::new();
+        device.put_block(10, &[7]);
+        let mut addrs = [0; NDIRECT + 3];
+        addrs[0] = 10;
+        let mut directory = file_inode(1, addrs);
+        directory.type_ = T_DIR;
+        device.put_inode(1, directory);
+        let mut device_inode = file_inode(0, [0; NDIRECT + 3]);
+        device_inode.type_ = T_DEV;
+        device.put_inode(2, device_inode);
+        let buffers = BufferCache::<_, BUFFERS>::new(device);
+        let cache = InodeCache::<_, BUFFERS, 2>::new(&buffers, superblock());
+        let directory_ref = cache.iget(1).expect("iget directory");
+        let directory = directory_ref.lock().expect("lock directory");
+        let mut byte = [0];
+        assert_eq!(directory.read_at(&mut byte, 0), Ok(1));
+        assert_eq!(byte, [7]);
+        drop(directory);
+
+        let device_ref = cache.iget(2).expect("iget device");
+        let device = device_ref.lock().expect("lock device");
+        assert_eq!(device.read_at(&mut byte, 0), Err(FsError::Unsupported));
     }
 }
